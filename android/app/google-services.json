@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "443319926125",
+    "project_id": "techconnectapp-e56d3",
+    "storage_bucket": "techconnectapp-e56d3.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:443319926125:android:6651159f77b454e066ee64",
+        "android_client_info": {
+          "package_name": "com.example.techconnect"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBEchv8UCSYp0yZ2F5I96wIW9BPiEmHfc0"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

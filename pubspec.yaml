@@ -1,0 +1,111 @@
+name: techconnect
+description: "A new Flutter project."
+publish_to: "none"
+
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # UI / Media
+  cupertino_icons: ^1.0.8
+  flutter_svg: ^2.0.10+1
+  video_player: ^2.9.0
+  shared_preferences: ^2.5.3
+
+  # OTP giriş
+  pinput: ^5.0.0
+
+  # Firebase (FlutterFire – GÜNCELLENMİŞ ve UYUMLU SÜRÜMLER)
+  firebase_core: ^3.1.1
+  firebase_auth: ^5.1.1
+  cloud_firestore: ^5.0.2
+  firebase_storage: ^12.0.2
+  firebase_messaging: ^15.0.3
+  flutter_local_notifications: ^17.1.2
+
+  # Diğer paketler
+  http: ^1.1.0
+  image_picker: ^1.1.2
+  intl: ^0.19.0
+  provider: ^6.1.2
+  record: ^6.1.2
+  permission_handler: ^11.3.1
+  path_provider: ^2.1.3
+  audioplayers: ^6.0.0
+  flutter_dotenv: ^5.1.0
+  url_launcher: ^6.3.0
+  file_picker: ^8.0.0
+  share_plus: ^10.0.0
+  google_maps_flutter: ^2.5.0
+  geolocator: ^12.0.0
+  geocoding: ^3.0.0
+  flutter_slidable: ^3.1.0
+  flutter_markdown: ^0.7.3
+  flutter_webrtc: ^0.12.0
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.13.1
+
+
+flutter_icons:
+  android: true
+  ios: true
+  image_path: "assets/app_icon/icon2.png"
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - .env
+
+    - assets/data/motivations.txt
+    - assets/legal/terms_tr.md
+    - assets/legal/privacy_tr.md
+
+    - assets/images/TechConnect.mp4
+    - assets/images/techconnectlogo.png
+    - assets/images/welcomeing.svg
+    - assets/images/ai_match.svg
+    - assets/images/community.svg
+    - assets/images/getting_started.svg
+    - assets/images/profile_rozet.svg
+    - assets/images/video_call.svg
+    - assets/images/mailbox.svg
+
+    - assets/icons/google.png
+    - assets/icons/github.png
+    - assets/icons/apple.png
+    - assets/icons/instagram.png
+    - assets/icons/search.png
+    - assets/icons/home2.png
+    - assets/icons/more.png
+    - assets/icons/notification.png
+    - assets/icons/user.png
+    - assets/icons/chatting.png
+    - assets/icons/send.png
+    - assets/icons/news1.png
+    - assets/icons/doc.png
+    - assets/icons/pdf.png
+    - assets/icons/ppt.png
+    - assets/icons/xls.png
+    - assets/icons/zip.png
+    - assets/icons/ai.png
+    - assets/icons/job.png
+    - assets/icons/home_light.png
+    - assets/icons/job_light.png
+    - assets/icons/more_light.png
+    - assets/icons/notification_light.png
+    - assets/icons/user_light.png
+    - assets/icons/gps.png
+    - assets/icons/chat_arrow.png
+    - assets/icons/reach.png
