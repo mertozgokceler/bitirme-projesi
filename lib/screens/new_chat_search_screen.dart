@@ -27,6 +27,7 @@ class _NewChatSearchScreenState extends State<NewChatSearchScreen> {
 
   Future<void> _search(String q) async {
     if (q.isEmpty) {
+      if (!mounted) return;
       setState(() {
         _results = [];
         _loading = false;
@@ -98,14 +99,15 @@ class _NewChatSearchScreenState extends State<NewChatSearchScreen> {
     final chatId = buildChatId(currentUid, otherUid);
     final chatRef = _fs.collection('chats').doc(chatId);
 
+    // ✅ ÖNEMLİ: Yeni sohbet oluşturmak "mesaj" değildir.
+    // Bu yüzden lastMessage / lastMessageSenderId / lastMessageTimestamp YAZMIYORUZ.
+    // Bildirimler sadece messages alt koleksiyonuna gerçek mesaj gelince tetiklenmeli.
     await chatRef.set({
       'users': [currentUid, otherUid],
       'archivedBy': <String>[],
       'clearedAt': <String, dynamic>{},
-      'lastMessage': '',
-      'lastMessageSenderId': '',
-      'lastMessageTimestamp': FieldValue.serverTimestamp(),
       'createdAt': FieldValue.serverTimestamp(),
+      'isArchived': false, // sende chat ekranı bunu kullanıyorsa kalsın
     }, SetOptions(merge: true));
 
     if (!mounted) return;
@@ -116,7 +118,7 @@ class _NewChatSearchScreenState extends State<NewChatSearchScreen> {
         builder: (context) => ChatDetailScreen(
           chatId: chatId,
           otherUser: otherUser,
-          callService: _callService, // ✅ FIX
+          callService: _callService,
         ),
       ),
     );

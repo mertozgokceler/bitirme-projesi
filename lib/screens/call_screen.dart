@@ -30,10 +30,9 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // ✅ statusText sadece UI text için; kapanış string'e bağlanmaz.
     c.statusText.addListener(_onStatusChanged);
 
-    // ✅ Video call’da speaker açmak istersen
+    // Video call’da speaker açmak istersen
     if (c.isVideo && !c.speakerOn) {
       // ignore: discarded_futures
       c.toggleSpeaker();
@@ -41,9 +40,9 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
   }
 
   void _onStatusChanged() {
-    // İstersen süreyi sadece bağlanınca başlat
     final v = c.statusText.value.toLowerCase();
-    final connected = v.contains('bağlandı');
+    final connected =
+        v.contains('bağlandı') || v.contains('connected') || v.contains('active');
 
     if (connected && _ticker == null) {
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -51,10 +50,6 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
         setState(() => _seconds++);
       });
     }
-
-    // ❌ Burada "sonlandı" ile pop yok.
-    // Remote ended pop işini controller'ın onRemoteEnded callback’i yapmalı.
-    // Eğer sen yine de burada kapatmak istiyorsan, string yerine call doc status dinle.
   }
 
   @override
@@ -78,16 +73,17 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     if (_closed) return;
     _closed = true;
     if (!mounted) return;
-    Navigator.of(context).maybePop();
+    Navigator.of(context).pop(); // ✅ kesin pop
   }
 
   Future<void> _endCall() async {
-    if (_ending) return;
+    if (_ending || _closed) return;
     setState(() => _ending = true);
 
+    // ✅ UI kapanması HİÇBİR ZAMAN hangUp’a bağlı olmamalı.
+    // hangUp takılırsa 1.2s sonra yine de kapat.
     try {
-      // ✅ local hangup: ended yazar + cleanup yapar
-      await c.hangUp();
+      await c.hangUp().timeout(const Duration(milliseconds: 1200));
     } catch (_) {
       // ignore
     } finally {
@@ -100,9 +96,12 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     final otherName = (c.otherName ?? c.otherUid ?? 'Kullanıcı');
 
     return PopScope(
-      canPop: false,
+      // ✅ canPop KAPALI OLMAYACAK. Yoksa pop çalışmaz, ekran kilitlenir.
+      canPop: true,
       onPopInvoked: (didPop) async {
-        // ✅ back/swipe ne olursa olsun düzgün kapat
+        // Kullanıcı back/swipe yaptıysa, call’ı düzgün kapat.
+        // didPop true ise zaten pop oldu; tekrar pop yapma.
+        if (didPop) return;
         await _endCall();
       },
       child: Scaffold(
