@@ -13,8 +13,9 @@ import 'package:share_plus/share_plus.dart';
 
 import '../screens/news_list_screen.dart';
 import '../screens/news_detail_screen.dart';
-import '../services/location_service.dart';
-import '../widgets/city_picker_sheet.dart';
+import '../utils/premium_utils.dart';
+import '../widgets/stories_strip.dart';
+
 
 class HomeTab extends StatefulWidget {
   const HomeTab({super.key});
@@ -389,6 +390,9 @@ class _HomeTabState extends State<HomeTab> {
             _buildMotivationBubble(context),
             const SizedBox(height: 10),
             _buildNewsSection(),
+            const SizedBox(height: 10),
+            const StoriesStrip(),
+            const SizedBox(height: 6),
             _buildFeedFromPosts(),
           ],
         ),
@@ -403,31 +407,8 @@ class _HomeTabState extends State<HomeTab> {
 
     final displayName = _firstName.isEmpty ? 'Tekrar merhaba!' : _firstName;
     final onHeader = cs.onPrimary;
+    final bool isPremium = isPremiumActiveFromUserDoc(_currentUserMap);
 
-    Future<void> _updateLocation() async {
-      try {
-        await LocationService.requestAndSaveLiveLocation();
-        await _onRefresh();
-
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('📍 Konum güncellendi')),
-          );
-        }
-      } catch (_) {
-        final city = await showCityPickerSheet(context);
-        if (city != null && city.trim().isNotEmpty) {
-          await LocationService.saveManualCity(city);
-          await _onRefresh();
-
-          if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('🏙️ Şehir manuel güncellendi')),
-            );
-          }
-        }
-      }
-    }
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
@@ -449,14 +430,23 @@ class _HomeTabState extends State<HomeTab> {
       ),
       child: Row(
         children: [
-          CircleAvatar(
-            radius: 26,
-            backgroundColor: onHeader.withOpacity(isDark ? 0.14 : 0.18),
-            backgroundImage:
-            _userPhotoUrl != null ? NetworkImage(_userPhotoUrl!) : null,
-            child: _userPhotoUrl == null
-                ? Icon(Icons.person, color: onHeader, size: 28)
-                : null,
+          Container(
+            padding: EdgeInsets.all(isPremium ? 2.6 : 0), // çerçeve kalınlığı hissi
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: isPremium
+                  ? Border.all(color: const Color(0xFFEFBF04), width: 2.6)
+                  : null,
+            ),
+            child: CircleAvatar(
+              radius: 26,
+              backgroundColor: onHeader.withOpacity(isDark ? 0.14 : 0.18),
+              backgroundImage:
+              _userPhotoUrl != null ? NetworkImage(_userPhotoUrl!) : null,
+              child: _userPhotoUrl == null
+                  ? Icon(Icons.person, color: onHeader, size: 28)
+                  : null,
+            ),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -486,19 +476,6 @@ class _HomeTabState extends State<HomeTab> {
             ),
           ),
           const SizedBox(width: 8),
-          InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: _updateLocation,
-            child: Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Image.asset(
-                'assets/icons/gps.png',
-                width: 30,
-                height: 30,
-                color: onHeader,
-              ),
-            ),
-          ),
         ],
       ),
     );
@@ -1014,7 +991,7 @@ class _HomeTabState extends State<HomeTab> {
           ),
         ),
         SizedBox(
-          height: 210,
+          height: 230,
           child: _isLoadingNews
               ? const Center(child: CircularProgressIndicator())
               : (_newsArticles.isNotEmpty ? _buildNewsList() : _buildStaticFallbackNews()),
@@ -1596,12 +1573,16 @@ class _NewsCard extends StatelessWidget {
             children: [
               Image.asset('assets/icons/news1.png', width: 26, height: 26),
               const SizedBox(width: 8),
-              Text(
-                source,
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w700,
-                  color: sourceColor,
+              Expanded(
+                child: Text(
+                  source,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: sourceColor,
+                  ),
                 ),
               ),
             ],

@@ -2314,3 +2314,205 @@ exports.completeDemoPaymentAndActivatePremium = onCall(async (request) => {
     premiumUntil: computedPremiumUntil, // Timestamp (client isterse gösterir)
   };
 });
+
+// ✅ STORY HELPERS
+function storySummaryFromItem({ ownerUid, userName, userPhotoUrl, lastStoryAt, lastThumbUrl, expiresAt, activeCount }) {
+  return {
+    ownerUid,
+    userName: userName || "",
+    userPhotoUrl: userPhotoUrl || "",
+    lastStoryAt: lastStoryAt || FieldValue.serverTimestamp(),
+    lastThumbUrl: lastThumbUrl || "",
+    expiresAt: expiresAt || FieldValue.serverTimestamp(),
+    activeCount: Number(activeCount || 0),
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+}
+
+// recompute owner summary by scanning remaining active items
+async function recomputeOwnerStorySummary(db, ownerUid) {
+  const itemsRef = db.collection("stories").doc(ownerUid).collection("items");
+
+  // sadece aktifleri çek (expiresAt > now)
+  const now = Timestamp.now();
+  const snap = await itemsRef.where("expiresAt", ">", now).orderBy("expiresAt", "desc").limit(50).get();
+
+  if (snap.empty) {
+    return { exists: false };
+  }
+
+  const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  // lastStoryAt: createdAt en yeni item (createdAt yoksa expiresAt'a bakar)
+  docs.sort((a, b) => {
+    const ac = a.createdAt?.toMillis?.() || 0;
+    const bc = b.createdAt?.toMillis?.() || 0;
+    return bc - ac;
+  });
+
+  const latest = docs[0];
+  const maxExpire = docs.reduce((m, x) => {
+    const t = x.expiresAt?.toMillis?.() || 0;
+    return Math.max(m, t);
+  }, 0);
+
+  return {
+    exists: true,
+    lastStoryAt: latest.createdAt || FieldValue.serverTimestamp(),
+    lastThumbUrl: latest.thumbUrl || latest.mediaUrl || "",
+    expiresAt: Timestamp.fromMillis(maxExpire),
+    activeCount: docs.length,
+  };
+}
+
+// ✅ 1) ITEM create/update => owner summary + viewer feed update
+exports.onStoryItemWrite = onDocumentWritten("stories/{ownerUid}/items/{storyId}", async (event) => {
+  const db = getFirestore();
+  const ownerUid = event.params.ownerUid;
+
+  // delete handled by separate function
+  if (!event.data?.after?.exists) return;
+
+  const item = event.data.after.data() || {};
+
+  // owner summary doc (stories/{ownerUid})
+  const ownerRef = db.collection("stories").doc(ownerUid);
+
+  // user meta (adı/foto) users'dan çek
+  const userSnap = await db.collection("users").doc(ownerUid).get();
+  const u = userSnap.exists ? (userSnap.data() || {}) : {};
+  const userName = u.name || u.companyName || "";
+  const userPhotoUrl = u.photoUrl || u.photo || u.profilePhotoUrl || "";
+
+  const expiresAt = item.expiresAt && typeof item.expiresAt.toDate === "function"
+    ? item.expiresAt
+    : Timestamp.fromDate(new Date(Date.now() + 24 * 60 * 60 * 1000));
+
+  const lastStoryAt = item.createdAt || FieldValue.serverTimestamp();
+  const lastThumbUrl = item.thumbUrl || item.mediaUrl || "";
+
+  // owner summary'yi en azından ileri taşı (expires büyürse büyüt)
+  await ownerRef.set(
+    storySummaryFromItem({
+      ownerUid,
+      userName,
+      userPhotoUrl,
+      lastStoryAt,
+      lastThumbUrl,
+      expiresAt,
+      activeCount: FieldValue.increment(1), // tam sayı değil ama delete'te recompute edeceğiz
+    }),
+    { merge: true }
+  );
+
+  // connections => storyFeed fanout (SADECE ÖZET)
+  const conSnap = await db.collection("connections").doc(ownerUid).collection("list").get();
+  if (conSnap.empty) return;
+
+  const payload = storySummaryFromItem({
+    ownerUid,
+    userName,
+    userPhotoUrl,
+    lastStoryAt,
+    lastThumbUrl,
+    expiresAt,
+    activeCount: 1, // burada exact olmak zorunda değil, UI için yeterli
+  });
+
+  let batch = db.batch();
+  let ops = 0;
+
+  for (const c of conSnap.docs) {
+    const viewerUid = c.id;
+    const ref = db.collection("storyFeed").doc(viewerUid).collection("items").doc(ownerUid);
+    batch.set(ref, payload, { merge: true });
+    ops++;
+
+    if (ops >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      ops = 0;
+    }
+  }
+  if (ops > 0) await batch.commit();
+});
+
+// ✅ 2) ITEM delete (manual veya TTL) => recompute; bitti ise feed temizle
+exports.onStoryItemDelete = onDocumentDeleted("stories/{ownerUid}/items/{storyId}", async (event) => {
+  const db = getFirestore();
+  const ownerUid = event.params.ownerUid;
+
+  const ownerRef = db.collection("stories").doc(ownerUid);
+
+  // kalan aktif var mı?
+  const recompute = await recomputeOwnerStorySummary(db, ownerUid);
+
+  // connections list
+  const conSnap = await db.collection("connections").doc(ownerUid).collection("list").get();
+
+  if (!recompute.exists) {
+    // owner summary sil
+    await ownerRef.delete().catch(() => {});
+
+    // viewer feed’lerden kaldır
+    let batch = db.batch();
+    let ops = 0;
+    for (const c of conSnap.docs) {
+      const viewerUid = c.id;
+      batch.delete(db.collection("storyFeed").doc(viewerUid).collection("items").doc(ownerUid));
+      ops++;
+      if (ops >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        ops = 0;
+      }
+    }
+    if (ops > 0) await batch.commit();
+    return;
+  }
+
+  // user meta
+  const userSnap = await db.collection("users").doc(ownerUid).get();
+  const u = userSnap.exists ? (userSnap.data() || {}) : {};
+  const userName = u.name || u.companyName || "";
+  const userPhotoUrl = u.photoUrl || u.photo || u.profilePhotoUrl || "";
+
+  // owner summary güncelle
+  await ownerRef.set(
+    storySummaryFromItem({
+      ownerUid,
+      userName,
+      userPhotoUrl,
+      lastStoryAt: recompute.lastStoryAt,
+      lastThumbUrl: recompute.lastThumbUrl,
+      expiresAt: recompute.expiresAt,
+      activeCount: recompute.activeCount,
+    }),
+    { merge: true }
+  );
+
+  // viewer feed update
+  const payload = storySummaryFromItem({
+    ownerUid,
+    userName,
+    userPhotoUrl,
+    lastStoryAt: recompute.lastStoryAt,
+    lastThumbUrl: recompute.lastThumbUrl,
+    expiresAt: recompute.expiresAt,
+    activeCount: recompute.activeCount,
+  });
+
+  let batch = db.batch();
+  let ops = 0;
+  for (const c of conSnap.docs) {
+    const viewerUid = c.id;
+    batch.set(db.collection("storyFeed").doc(viewerUid).collection("items").doc(ownerUid), payload, { merge: true });
+    ops++;
+    if (ops >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      ops = 0;
+    }
+  }
+  if (ops > 0) await batch.commit();
+});
+

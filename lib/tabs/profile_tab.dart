@@ -19,7 +19,6 @@ import '../screens/my_applications_screen.dart';
 import '../screens/job_test_hub_screen.dart';
 import '../screens/profile_views_screen.dart';
 
-
 class ProfileTab extends StatefulWidget {
   const ProfileTab({super.key});
 
@@ -52,10 +51,8 @@ class _ProfileTabState extends State<ProfileTab> {
       return;
     }
     try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final doc =
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       if (mounted) {
         if (doc.exists) {
           setState(() {
@@ -87,9 +84,9 @@ class _ProfileTabState extends State<ProfileTab> {
     try {
       final snap = await FirebaseFirestore.instance
           .collection('connections')
-          .doc(uid) // 🔹 önce kendi userId dokümanın
-          .collection('list') // 🔹 altındaki list subcollection
-      // .where('status', isEqualTo: 'accepted')  // status alanı kullanıyorsan BUNU aç
+          .doc(uid)
+          .collection('list')
+      // .where('status', isEqualTo: 'accepted')
           .get();
 
       if (!mounted) return;
@@ -158,7 +155,7 @@ class _ProfileTabState extends State<ProfileTab> {
   // ------------------------------------------------------------
   Widget _buildIndividualProfilePage() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+      padding: const EdgeInsets.only(top: 4, left: 16, right: 16, bottom: 16),
       child: Column(
         children: [
           _buildProfileHeader(),
@@ -333,14 +330,13 @@ class _ProfileTabState extends State<ProfileTab> {
             icon: Icons.people_alt_outlined,
             title: 'Aday Havuzum',
             onTap: () {
-              // TODO: Aday havuzu ekranı
+              // TODO
             },
           ),
           _buildProfileMenuItem(
             icon: Icons.auto_awesome_outlined,
             title: 'AI Eşleşme Sonuçları',
             onTap: () {
-              // Örnek: Premium özelliğe bağlayabilirsin
               _showProfileViewsPremiumDialog();
             },
           ),
@@ -363,16 +359,12 @@ class _ProfileTabState extends State<ProfileTab> {
           _buildProfileMenuItem(
             icon: Icons.chat_bubble_outline,
             title: 'Mesajlar',
-            onTap: () {
-              // TODO: Mesajlaşma ekranına git
-            },
+            onTap: () {},
           ),
           _buildProfileMenuItem(
             icon: Icons.handshake_outlined,
             title: 'İş Birliği Talepleri',
-            onTap: () {
-              // TODO: İş birliği talepleri ekranı
-            },
+            onTap: () {},
           ),
 
           const SizedBox(height: 16),
@@ -385,8 +377,7 @@ class _ProfileTabState extends State<ProfileTab> {
             onTap: () async {
               final result = await Navigator.of(context).push(
                 MaterialPageRoute(
-                  builder: (context) =>
-                      EditProfileScreen(initialUserData: _userData!),
+                  builder: (context) => EditProfileScreen(initialUserData: _userData!),
                 ),
               );
               if (result == true) {
@@ -397,16 +388,12 @@ class _ProfileTabState extends State<ProfileTab> {
           _buildProfileMenuItem(
             icon: Icons.groups_2_outlined,
             title: 'Ekip Üyeleri',
-            onTap: () {
-              // TODO: Ekip yönetimi ekranı
-            },
+            onTap: () {},
           ),
           _buildProfileMenuItem(
             icon: Icons.info_outline,
             title: 'Hakkımızda',
-            onTap: () {
-              // TODO: Hakkımızda / açıklama düzenleme
-            },
+            onTap: () {},
           ),
 
           const SizedBox(height: 16),
@@ -427,16 +414,12 @@ class _ProfileTabState extends State<ProfileTab> {
           _buildProfileMenuItem(
             icon: Icons.receipt_long_outlined,
             title: 'Fatura Geçmişi',
-            onTap: () {
-              // TODO: Faturalandırma geçmişi ekranı
-            },
+            onTap: () {},
           ),
           _buildProfileMenuItem(
             icon: Icons.account_balance_wallet_outlined,
             title: 'Şirket Kredileri',
-            onTap: () {
-              // TODO: Kredi / kontör sistemi
-            },
+            onTap: () {},
           ),
 
           const SizedBox(height: 16),
@@ -490,11 +473,9 @@ class _ProfileTabState extends State<ProfileTab> {
         (data['isCompany'] == true) || (data['type'] == 'company');
 
     final String? personName = data['name'] as String?;
-    final String? companyNameTop = (data['companyName'] ?? data['company']?['name']) as String?;
+    final String? companyNameTop =
+    (data['companyName'] ?? data['company']?['name']) as String?;
 
-    // 🔹 Ekranda gösterilecek isim:
-    //    Şirket hesabında -> companyName
-    //    Bireysel hesapta -> normal name
     final String displayName = isCompany
         ? (companyNameTop != null && companyNameTop.isNotEmpty
         ? companyNameTop
@@ -516,10 +497,10 @@ class _ProfileTabState extends State<ProfileTab> {
     // ✅ Premium kontrollü avatar
     final Widget avatar = isPremium
         ? Container(
-      padding: const EdgeInsets.all(3), // çerçeve kalınlığı
+      padding: const EdgeInsets.all(3),
       decoration: const BoxDecoration(
         shape: BoxShape.circle,
-        color: Color(0xFFEFBF04), // premium altın
+        color: Color(0xFFEFBF04),
       ),
       child: CircleAvatar(
         radius: 45,
@@ -534,104 +515,108 @@ class _ProfileTabState extends State<ProfileTab> {
       child: photoUrl == null ? const Icon(Icons.person, size: 45) : null,
     );
 
-    return Column(
+
+    return Stack(
       children: [
-        avatar,
-        const SizedBox(height: 12),
+        Column(
+          children: [
+            avatar,
+            const SizedBox(height: 12),
 
-        // ✅ İsim + Premium Lottie (premiumsa)
-        SizedBox(
-          height: 40,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // 🔵 İsim – HER ZAMAN TAM ORTA
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 48),
-                child: Text(
-                  displayName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-
-              // 🟡 Premium rozeti – SAĞA SABİT
-              if (isPremium)
-                Positioned(
-                  right: 0,
-                  child: SizedBox(
-                    width: 34,
-                    height: 34,
-                    child: Lottie.asset(
-                      'assets/lottie/premium.json',
-                      repeat: true,
-                      animate: true,
-                      fit: BoxFit.contain,
+            // ✅ İsim + Premium Lottie (premiumsa)
+            SizedBox(
+              height: 40,
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 48),
+                    child: Text(
+                      displayName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
-                ),
-            ],
-          ),
-        ),
-
-
-        const SizedBox(height: 4),
-
-        Text(
-          '@$username',
-          style: const TextStyle(
-            fontSize: 16,
-            color: Colors.grey,
-          ),
-        ),
-
-        if (hasInfo) ...[
-          const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (location != null && location.isNotEmpty)
-                _buildInfoChip(Icons.location_on_outlined, location),
-              if ((location != null && location.isNotEmpty) &&
-                  (role != null && role.isNotEmpty))
-                _buildDotSeparator(),
-              if (role != null && role.isNotEmpty)
-                _buildInfoChip(Icons.work_outline, role),
-              if (((location != null && location.isNotEmpty) ||
-                  (role != null && role.isNotEmpty)) &&
-                  hasConnections)
-                _buildDotSeparator(),
-              if (hasConnections)
-                _buildInfoChip(Icons.group_outlined, '$_connectionCount bağlantı'),
-            ],
-          ),
-        ],
-
-        const SizedBox(height: 16),
-
-        OutlinedButton(
-          onPressed: () async {
-            final result = await Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (context) =>
-                    EditProfileScreen(initialUserData: _userData!),
+                  if (isPremium)
+                    Positioned(
+                      right: 0,
+                      child: SizedBox(
+                        width: 34,
+                        height: 34,
+                        child: Lottie.asset(
+                          'assets/lottie/premium.json',
+                          repeat: true,
+                          animate: true,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                    ),
+                ],
               ),
-            );
-            if (result == true) {
-              _fetchUserData();
-            }
-          },
-          child: Text(isCompany ? 'Şirket Profilini Düzenle' : 'Profili Düzenle'),
+            ),
+
+            const SizedBox(height: 4),
+
+            Text(
+              '@$username',
+              style: const TextStyle(
+                fontSize: 16,
+                color: Colors.grey,
+              ),
+            ),
+
+            if (hasInfo) ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (location != null && location.isNotEmpty)
+                    _buildInfoChip(Icons.location_on_outlined, location),
+                  if ((location != null && location.isNotEmpty) &&
+                      (role != null && role.isNotEmpty))
+                    _buildDotSeparator(),
+                  if (role != null && role.isNotEmpty)
+                    _buildInfoChip(Icons.work_outline, role),
+                  if (((location != null && location.isNotEmpty) ||
+                      (role != null && role.isNotEmpty)) &&
+                      hasConnections)
+                    _buildDotSeparator(),
+                  if (hasConnections)
+                    _buildInfoChip(
+                      Icons.group_outlined,
+                      '$_connectionCount bağlantı',
+                    ),
+                ],
+              ),
+            ],
+
+            const SizedBox(height: 16),
+
+            OutlinedButton(
+              onPressed: () async {
+                final result = await Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (context) =>
+                        EditProfileScreen(initialUserData: _userData!),
+                  ),
+                );
+                if (result == true) {
+                  _fetchUserData();
+                }
+              },
+              child:
+              Text(isCompany ? 'Şirket Profilini Düzenle' : 'Profili Düzenle'),
+            ),
+          ],
         ),
       ],
     );
   }
-
 
   // Konum / rol / bağlantı chip
   Widget _buildInfoChip(IconData icon, String text) {
@@ -677,9 +662,7 @@ class _ProfileTabState extends State<ProfileTab> {
           fontWeight: FontWeight.w500,
         ),
       ),
-      trailing: color == null
-          ? const Icon(Icons.arrow_forward_ios, size: 16)
-          : null,
+      trailing: color == null ? const Icon(Icons.arrow_forward_ios, size: 16) : null,
       onTap: onTap,
     );
   }
@@ -758,13 +741,8 @@ class _ProfileTabState extends State<ProfileTab> {
     if (user == null) return;
 
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
+      final snap = await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       final data = snap.data() ?? {};
-
       final premiumActive = isPremiumActiveFromUserDoc(data);
 
       if (premiumActive) {
@@ -779,6 +757,7 @@ class _ProfileTabState extends State<ProfileTab> {
       _showProfileViewsPremiumDialog();
     }
   }
+
   bool isPremiumActiveFromUserDoc(Map<String, dynamic> data) {
     final isPremiumFlag = data['isPremium'] == true;
 

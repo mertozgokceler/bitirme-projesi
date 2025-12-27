@@ -25,6 +25,10 @@ import '../in_app_notification.dart';
 import '../screens/connection_requests_screen.dart';
 import '../screens/job_apply_screen.dart';
 import '../screens/incoming_call_screen.dart';
+import '../services/location_service.dart';
+import '../widgets/city_picker_sheet.dart';
+
+
 // ✅ CALL - Global Yakalama
 import '../services/call_service.dart';
 
@@ -123,6 +127,42 @@ class _MainNavShellState extends State<MainNavShell>
       _startIncomingCallServiceListener();
     });
   }
+
+  Future<void> _handleLocationAction() async {
+    if (!mounted) return;
+
+    try {
+      // ✅ 1) Önce GPS dene
+      await LocationService.requestAndSaveLiveLocation();
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Konum güncellendi (GPS).')),
+      );
+    } catch (_) {
+      // ✅ 2) GPS patladıysa → manuel şehir sheet aç
+      final city = await showCityPickerSheet(context);
+
+      if (city == null) return;
+      final trimmed = city.trim();
+      if (trimmed.isEmpty) return;
+
+      try {
+        await LocationService.saveManualCity(trimmed);
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Konum güncellendi: $trimmed')),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Konum kaydedilemedi: $e')),
+        );
+      }
+    }
+  }
+
 
   Future<void> _initNotificationsForCurrentUser() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -575,13 +615,15 @@ class _MainNavShellState extends State<MainNavShell>
     );
   }
 
-  Widget _buildSearchBubble(BuildContext context) {
+  Widget _buildSearchBubble(
+      BuildContext context, {
+        Widget? rightInside,
+      }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
     final bg = theme.colorScheme.surfaceVariant.withOpacity(isDark ? 0.18 : 0.75);
     final border = theme.colorScheme.outlineVariant.withOpacity(isDark ? 0.30 : 0.55);
-    final text = theme.colorScheme.onSurfaceVariant.withOpacity(isDark ? 0.92 : 0.85);
     final hint = theme.colorScheme.onSurfaceVariant.withOpacity(isDark ? 0.55 : 0.65);
 
     return Material(
@@ -629,6 +671,10 @@ class _MainNavShellState extends State<MainNavShell>
                       ),
                     ),
                   ),
+                  if (rightInside != null) ...[
+                    const SizedBox(width: 8),
+                    rightInside,
+                  ],
                 ],
               ),
             ),
@@ -666,24 +712,34 @@ class _MainNavShellState extends State<MainNavShell>
         titleSpacing: 0,
         title: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
-          child: _buildSearchBubble(context),
-        ),
-        actions: [
-          if (_isCompany)
-            IconButton(
-              tooltip: 'İlan Ekle',
-              icon: const Icon(Icons.post_add),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => const CreateJobPostScreen()),
-                );
-              },
+          child: _buildSearchBubble(
+            context,
+            rightInside: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: _handleLocationAction, // ✅ TEK DOĞRU ÇAĞRI
+              child: Padding(
+                padding: const EdgeInsets.all(2),
+                child: InkResponse(
+                  onTap: _handleLocationAction,
+                  radius: 22,
+                  child: Padding(
+                    padding: const EdgeInsets.all(2),
+                    child: Image.asset(
+                      'assets/icons/gps.png',
+                      width: 24,
+                      height: 24,
+                      fit: BoxFit.contain,
+                      color: const Color(0xFFFC7CFF),
+                    ),
+                  ),
+                ),
+
+              ),
             ),
-        ],
+          ),
+        ),
       );
     }
-
     // Home: senin mevcut "logo + search + chat" AppBar
     return AppBar(
       automaticallyImplyLeading: false,
