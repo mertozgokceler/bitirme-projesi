@@ -3,6 +3,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:lottie/lottie.dart';
 
 import '../screens/create_post_screen.dart';
 
@@ -29,9 +30,58 @@ class _AddPostTabState extends State<AddPostTab> {
 
     return _firestore
         .collection('posts')
-        .where('userId', isEqualTo: user.uid) // 👈 userId olarak DÜZELTİLDİ
+        .where('userId', isEqualTo: user.uid)
         .orderBy('createdAt', descending: true)
         .snapshots();
+  }
+
+  // ✅ EMPTY FEED (LOTTIE)
+  Widget _buildEmptyFeed(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Transform.translate(
+          offset: const Offset(0, -70), // 👈 tüm bloğu yukarı alır
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 240,
+                height: 240,
+                child: Lottie.asset(
+                  'assets/lottie/empty_feed.json',
+                  repeat: true,
+                  fit: BoxFit.contain,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Henüz bir gönderi paylaşmadın',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Sağ alttaki + butonuna dokunarak\nilk gönderini paylaşabilirsin.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.35,
+                  color: isDark ? Colors.white60 : Colors.grey.shade600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -91,16 +141,9 @@ class _AddPostTabState extends State<AddPostTab> {
               return const Center(child: CircularProgressIndicator());
             }
 
+            // ✅ EMPTY STATE (LOTTIE)
             if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-              return Center(
-                child: Text(
-                  'Henüz hiç gönderin yok.\nSağ alttan + ile ilk gönderini paylaş.',
-                  textAlign: TextAlign.center,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: isDark ? Colors.white70 : Colors.grey.shade700,
-                  ),
-                ),
-              );
+              return _buildEmptyFeed(context);
             }
 
             final docs = snapshot.data!.docs;
@@ -146,6 +189,9 @@ class _AddPostTabState extends State<AddPostTab> {
             );
           },
         ),
+
+        // Bu sayfada FAB kullanmıyorsun çünkü MainNavShell zaten _index==2 iken FAB basıyor.
+        // İstersen burada da özel FAB koyarsın ama şu an çakışmasın diye dokunmadım.
       ],
     );
   }
@@ -214,9 +260,8 @@ class _PostCard extends StatelessWidget {
                         Text(
                           userTitle,
                           style: TextStyle(
-                            color: isDark
-                                ? Colors.grey.shade400
-                                : Colors.grey,
+                            color:
+                            isDark ? Colors.grey.shade400 : Colors.grey,
                             fontSize: 12,
                           ),
                         ),
@@ -226,8 +271,7 @@ class _PostCard extends StatelessWidget {
                 Text(
                   timeAgo,
                   style: TextStyle(
-                    color:
-                    isDark ? Colors.grey.shade400 : Colors.grey,
+                    color: isDark ? Colors.grey.shade400 : Colors.grey,
                     fontSize: 12,
                   ),
                 ),
@@ -251,8 +295,7 @@ class _PostCard extends StatelessWidget {
               ),
             ),
           Padding(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
+            padding: const EdgeInsets.symmetric(horizontal: 4.0, vertical: 4.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
@@ -267,8 +310,7 @@ class _PostCard extends StatelessWidget {
     );
   }
 
-  Widget _actionButton(
-      IconData icon, String label, VoidCallback onPressed) {
+  Widget _actionButton(IconData icon, String label, VoidCallback onPressed) {
     return TextButton.icon(
       onPressed: onPressed,
       icon: Icon(icon, size: 20, color: Colors.grey.shade600),

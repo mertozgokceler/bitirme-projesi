@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../screens/demo_payment_screen.dart'; // ✅ kendi dosya yoluna göre düzelt
 
 class SubscriptionPlansScreen extends StatelessWidget {
   const SubscriptionPlansScreen({super.key});
@@ -32,9 +33,10 @@ class SubscriptionPlansScreen extends StatelessWidget {
           ),
           const SizedBox(height: 24),
 
-          // Örnek plan kartı – istediğin kadar çoğalt / özelleştir
+          // ✅ AYLIK
           _buildPlanCard(
             context,
+            planId: 'premium_monthly',
             title: 'Aylık Premium',
             price: '₺59,90 / ay',
             features: const [
@@ -46,14 +48,18 @@ class SubscriptionPlansScreen extends StatelessWidget {
             isRecommended: true,
           ),
           const SizedBox(height: 16),
+
+          // ✅ YILLIK
           _buildPlanCard(
             context,
+            planId: 'premium_yearly',
             title: 'Yıllık Premium',
             price: '₺499,90 / yıl',
             features: const [
               'Tüm Premium özellikler',
               'Daha yüksek profil görüntülenme oranı',
-              'Yaklaşık %30 indirim',
+              'Yaklaşık %30 daha avantajlı',
+              'Öne çıkarılmış profil rozeti',
             ],
           ),
         ],
@@ -63,6 +69,7 @@ class SubscriptionPlansScreen extends StatelessWidget {
 
   Widget _buildPlanCard(
       BuildContext context, {
+        required String planId,
         required String title,
         required String price,
         required List<String> features,
@@ -141,11 +148,21 @@ class SubscriptionPlansScreen extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 16),
+
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: () {
-                  // TODO: satın alma / ödeme entegrasyonu
+                onPressed: () async {
+                  // ✅ Demo ödeme ekranına planId ile git
+                  await Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => DemoPaymentScreen(
+                        planId: planId,
+                        planTitle: title,
+                        planPrice: price,
+                      ),
+                    ),
+                  );
                 },
                 child: const Text('Bu Planı Seç'),
               ),

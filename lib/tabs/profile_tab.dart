@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:lottie/lottie.dart';
 
 import '../auth_screen.dart';
 import '../screens/edit_profile_screen.dart';
@@ -16,7 +17,7 @@ import '../screens/company_incoming_applications_screen.dart';
 import '../screens/ai_cv_analysis_screen.dart';
 import '../screens/my_applications_screen.dart';
 import '../screens/job_test_hub_screen.dart';
-
+import '../screens/profile_views_screen.dart';
 
 
 class ProfileTab extends StatefulWidget {
@@ -210,7 +211,7 @@ class _ProfileTabState extends State<ProfileTab> {
           _buildProfileMenuItem(
             icon: Icons.visibility_outlined,
             title: 'Profilimi Görüntüleyenler',
-            onTap: _showProfileViewsPremiumDialog,
+            onTap: _handleProfileViewsTap,
           ),
           _buildProfileMenuItem(
             icon: Icons.school_outlined,
@@ -482,49 +483,105 @@ class _ProfileTabState extends State<ProfileTab> {
   // ------------------------------------------------------------
   Widget _buildProfileHeader() {
     final data = _userData!;
+    final bool isPremium = isPremiumActiveFromUserDoc(data);
 
     // 🔹 Hesap tipi & şirket bilgileri
     final bool isCompany =
         (data['isCompany'] == true) || (data['type'] == 'company');
 
-    final String? personName = (data['name'] ?? '') as String?;
-    final String? companyNameTop =
-    (data['companyName'] ?? data['company']?['name']) as String?;
+    final String? personName = data['name'] as String?;
+    final String? companyNameTop = (data['companyName'] ?? data['company']?['name']) as String?;
 
     // 🔹 Ekranda gösterilecek isim:
     //    Şirket hesabında -> companyName
     //    Bireysel hesapta -> normal name
     final String displayName = isCompany
-        ? (companyNameTop?.isNotEmpty == true ? companyNameTop! : '(Şirket adı yok)')
-        : (personName?.isNotEmpty == true ? personName! : '(İsimsiz)');
+        ? (companyNameTop != null && companyNameTop.isNotEmpty
+        ? companyNameTop
+        : '(Şirket adı yok)')
+        : (personName != null && personName.isNotEmpty ? personName : '(İsimsiz)');
 
-    final username = data['username'] ?? 'Kullanıcı adı yok';
-    final photoUrl = data['photoUrl'];
-    final location = data['location'] as String?;
-    final role = data['role'] as String?;
+    final String username = (data['username'] ?? 'Kullanıcı adı yok') as String;
+    final String? photoUrl = data['photoUrl'] as String?;
+    final String? location = data['location'] as String?;
+    final String? role = data['role'] as String?;
 
-    final hasConnections = _connectionCount > 0;
+    final bool hasConnections = _connectionCount > 0;
 
-    final hasInfo = (location != null && location.isNotEmpty) ||
-        (role != null && role.isNotEmpty) ||
-        hasConnections;
+    final bool hasInfo =
+        (location != null && location.isNotEmpty) ||
+            (role != null && role.isNotEmpty) ||
+            hasConnections;
+
+    // ✅ Premium kontrollü avatar
+    final Widget avatar = isPremium
+        ? Container(
+      padding: const EdgeInsets.all(3), // çerçeve kalınlığı
+      decoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        color: Color(0xFFEFBF04), // premium altın
+      ),
+      child: CircleAvatar(
+        radius: 45,
+        backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        child: photoUrl == null ? const Icon(Icons.person, size: 45) : null,
+      ),
+    )
+        : CircleAvatar(
+      radius: 45,
+      backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
+      child: photoUrl == null ? const Icon(Icons.person, size: 45) : null,
+    );
 
     return Column(
       children: [
-        CircleAvatar(
-          radius: 45,
-          backgroundImage: photoUrl != null ? NetworkImage(photoUrl) : null,
-          child: photoUrl == null ? const Icon(Icons.person, size: 45) : null,
-        ),
+        avatar,
         const SizedBox(height: 12),
-        Text(
-          displayName,
-          style: const TextStyle(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
+
+        // ✅ İsim + Premium Lottie (premiumsa)
+        SizedBox(
+          height: 40,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              // 🔵 İsim – HER ZAMAN TAM ORTA
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 48),
+                child: Text(
+                  displayName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+
+              // 🟡 Premium rozeti – SAĞA SABİT
+              if (isPremium)
+                Positioned(
+                  right: 0,
+                  child: SizedBox(
+                    width: 34,
+                    height: 34,
+                    child: Lottie.asset(
+                      'assets/lottie/premium.json',
+                      repeat: true,
+                      animate: true,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
+
+
         const SizedBox(height: 4),
+
         Text(
           '@$username',
           style: const TextStyle(
@@ -532,6 +589,7 @@ class _ProfileTabState extends State<ProfileTab> {
             color: Colors.grey,
           ),
         ),
+
         if (hasInfo) ...[
           const SizedBox(height: 8),
           Row(
@@ -549,14 +607,13 @@ class _ProfileTabState extends State<ProfileTab> {
                   hasConnections)
                 _buildDotSeparator(),
               if (hasConnections)
-                _buildInfoChip(
-                  Icons.group_outlined,
-                  '$_connectionCount bağlantı',
-                ),
+                _buildInfoChip(Icons.group_outlined, '$_connectionCount bağlantı'),
             ],
           ),
         ],
+
         const SizedBox(height: 16),
+
         OutlinedButton(
           onPressed: () async {
             final result = await Navigator.of(context).push(
@@ -569,13 +626,12 @@ class _ProfileTabState extends State<ProfileTab> {
               _fetchUserData();
             }
           },
-          child: Text(
-            isCompany ? 'Şirket Profilini Düzenle' : 'Profili Düzenle',
-          ),
+          child: Text(isCompany ? 'Şirket Profilini Düzenle' : 'Profili Düzenle'),
         ),
       ],
     );
   }
+
 
   // Konum / rol / bağlantı chip
   Widget _buildInfoChip(IconData icon, String text) {
@@ -695,5 +751,51 @@ class _ProfileTabState extends State<ProfileTab> {
         );
       },
     );
+  }
+
+  Future<void> _handleProfileViewsTap() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      final data = snap.data() ?? {};
+
+      final premiumActive = isPremiumActiveFromUserDoc(data);
+
+      if (premiumActive) {
+        if (!mounted) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ProfileViewsScreen()),
+        );
+      } else {
+        _showProfileViewsPremiumDialog();
+      }
+    } catch (_) {
+      _showProfileViewsPremiumDialog();
+    }
+  }
+  bool isPremiumActiveFromUserDoc(Map<String, dynamic> data) {
+    final isPremiumFlag = data['isPremium'] == true;
+
+    final until = data['premiumUntil'];
+    DateTime? untilDt;
+
+    if (until is Timestamp) {
+      untilDt = until.toDate();
+    }
+
+    final now = DateTime.now();
+    final validByDate = untilDt != null && untilDt.isAfter(now);
+
+    // Tarih varsa onu esas al: geçmişse premium değil.
+    if (untilDt != null) return validByDate;
+
+    // Tarih yoksa flag’e bak.
+    return isPremiumFlag;
   }
 }

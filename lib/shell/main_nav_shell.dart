@@ -2,6 +2,7 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:ui';
 import 'package:http/http.dart' as http;
 
 import 'package:flutter/material.dart';
@@ -11,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:techconnect/screens/create_job_post_screen.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
+import 'package:lottie/lottie.dart';
 
 import '../screens/chat_list_screen.dart';
 import '../tabs/home_tab.dart';
@@ -29,6 +31,7 @@ import '../services/call_service.dart';
 import '../services/incoming_call_service.dart';
 
 const String kLogoPath = 'assets/images/techconnectlogo.png';
+const String kLogoGoldPath = 'assets/images/techconnect_logo_gold.png';
 
 class MainNavShell extends StatefulWidget {
   const MainNavShell({super.key});
@@ -50,6 +53,11 @@ class _MainNavShellState extends State<MainNavShell>
 
   bool _isCompany = false;
   bool _accountLoaded = false;
+
+  bool _isPremium = false;
+  bool _premiumLoaded = false;
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _premiumSub;
+
 
   final _pages = const [
     HomeTab(),
@@ -92,6 +100,7 @@ class _MainNavShellState extends State<MainNavShell>
     inAppNotificationService.loadFromPrefs();
     _initNotificationsForCurrentUser();
     _loadAccountType();
+    _listenPremiumStatus();
 
     _aiPulseController = AnimationController(
       vsync: this,
@@ -157,11 +166,62 @@ class _MainNavShellState extends State<MainNavShell>
     }
   }
 
+  bool _computeIsPremiumFromUser(Map<String, dynamic> data) {
+    final isPremiumFlag = data['isPremium'] == true;
+
+    final until = data['premiumUntil'];
+    DateTime? untilDt;
+
+    if (until is Timestamp) {
+      untilDt = until.toDate();
+    }
+
+    final now = DateTime.now();
+    final validByDate = untilDt != null && untilDt.isAfter(now);
+
+    // Flag true olsa bile tarih geçmişse premium sayma.
+    // Tarih varsa esas alınır.
+    if (untilDt != null) return validByDate;
+
+    return isPremiumFlag;
+  }
+
+  void _listenPremiumStatus() {
+    final user = _auth.currentUser;
+    if (user == null) return;
+
+    _premiumSub?.cancel();
+
+    _premiumSub = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .snapshots()
+        .listen((snap) {
+      final data = snap.data() ?? {};
+      final p = _computeIsPremiumFromUser(data);
+
+      if (!mounted) return;
+      setState(() {
+        _isPremium = p;
+        _premiumLoaded = true;
+      });
+    }, onError: (e) {
+      debugPrint('DEBUG[premium] listen error: $e');
+      if (!mounted) return;
+      setState(() {
+        _isPremium = false;
+        _premiumLoaded = true;
+      });
+    });
+  }
+
+
   @override
   void dispose() {
     _chatSub?.cancel();
     _connReqSub?.cancel();
     _authSub?.cancel();
+    _premiumSub?.cancel();
 
     _incomingCallService.dispose();
     _aiPulseController.dispose();
@@ -368,6 +428,9 @@ class _MainNavShellState extends State<MainNavShell>
   }
 
   Future<void> _showPremiumPopupIfNeeded() async {
+
+    if (_premiumLoaded && _isPremium) return;
+
     final prefs = await SharedPreferences.getInstance();
     final hide = prefs.getBool('hidePremiumPopup') ?? false;
     if (hide) return;
@@ -514,49 +577,153 @@ class _MainNavShellState extends State<MainNavShell>
 
   Widget _buildSearchBubble(BuildContext context) {
     final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
 
-    final bgColor = AppColors.searchBubbleBg(theme);
-    final borderColor = AppColors.searchBubbleBorder(theme);
-    final iconColor = AppColors.searchBubbleIcon(theme);
-    final textColor = AppColors.searchBubbleText(theme);
+    final bg = theme.colorScheme.surfaceVariant.withOpacity(isDark ? 0.18 : 0.75);
+    final border = theme.colorScheme.outlineVariant.withOpacity(isDark ? 0.30 : 0.55);
+    final text = theme.colorScheme.onSurfaceVariant.withOpacity(isDark ? 0.92 : 0.85);
+    final hint = theme.colorScheme.onSurfaceVariant.withOpacity(isDark ? 0.55 : 0.65);
 
-    return InkWell(
-      borderRadius: BorderRadius.circular(40),
-      onTap: () {
-        Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => const SearchTab(),
-          ),
-        );
-      },
-      child: Container(
-        height: 36,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: bgColor,
-          borderRadius: BorderRadius.circular(40),
-          border: Border.all(color: borderColor, width: 1),
-        ),
-        child: Row(
-          children: [
-            Icon(Icons.search, size: 18, color: iconColor),
-            const SizedBox(width: 6),
-            Expanded(
-              child: Text(
-                'Kullanıcı veya şirket ara',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: 13,
-                  color: textColor,
-                ),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(999),
+        onTap: () {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SearchTab()),
+          );
+        },
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(999),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 120),
+              height: 40,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              decoration: BoxDecoration(
+                color: bg,
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(color: border, width: 1),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(isDark ? 0.25 : 0.08),
+                    blurRadius: 16,
+                    offset: const Offset(0, 8),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.search_rounded, size: 18, color: hint),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Kullanıcı veya şirket ara',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.w500,
+                        color: hint,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
         ),
       ),
     );
   }
+
+  PreferredSizeWidget? _buildAppBar(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // AddPost tab: hiç AppBar istemiyorsan
+    if (_index == 2) return null;
+
+    // Notifications: basit başlık
+    if (_index == 3) {
+      return AppBar(
+        automaticallyImplyLeading: false,
+      );
+    }
+
+    // Profile: basit başlık
+    if (_index == 4) {
+      return AppBar(
+        automaticallyImplyLeading: false,
+      );
+    }
+
+    // Jobs: istersen search bubble KALABİLİR veya SADECE title olabilir.
+    // Ben senin mevcut UX'ine uygun: search bubble kalsın + sağda ilan ekle (şirketse) diyorum.
+    if (_index == 1) {
+      return AppBar(
+        automaticallyImplyLeading: false,
+        titleSpacing: 0,
+        title: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          child: _buildSearchBubble(context),
+        ),
+        actions: [
+          if (_isCompany)
+            IconButton(
+              tooltip: 'İlan Ekle',
+              icon: const Icon(Icons.post_add),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const CreateJobPostScreen()),
+                );
+              },
+            ),
+        ],
+      );
+    }
+
+    // Home: senin mevcut "logo + search + chat" AppBar
+    return AppBar(
+      automaticallyImplyLeading: false,
+      titleSpacing: 0,
+      leadingWidth: 64,
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 12),
+        child: Center(
+          child: Image.asset(
+            (_premiumLoaded && _isPremium) ? kLogoGoldPath : kLogoPath,
+            height: 42,
+            fit: BoxFit.contain,
+          ),
+        ),
+      ),
+      title: Padding(
+        padding: const EdgeInsets.only(left: 8, right: 12),
+        child: _buildSearchBubble(context),
+      ),
+      actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 8.0),
+          child: IconButton(
+            icon: Image.asset(
+              'assets/icons/chat_arrow.png',
+              width: 32,
+              height: 32,
+            ),
+            tooltip: 'Sohbetler',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const ChatListScreen()),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
 
   Widget _buildFloatingNavBar(BuildContext context) {
     return AnimatedBuilder(
@@ -704,52 +871,7 @@ class _MainNavShellState extends State<MainNavShell>
     }
 
     return Scaffold(
-      appBar: AppBar(
-        title: _index == 0
-            ? Row(
-          children: [
-            Image.asset(kLogoPath, height: 50, fit: BoxFit.contain),
-            const SizedBox(width: 8),
-            Expanded(child: _buildSearchBubble(context)),
-          ],
-        )
-            : Text(_titles[_index]),
-        centerTitle: _index != 0,
-        actions: [
-          if (_index == 0)
-            Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: IconButton(
-                icon: Image.asset(
-                  'assets/icons/chat_arrow.png',
-                  width: 32,
-                  height: 32,
-                ),
-                tooltip: 'Sohbetler',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const ChatListScreen()),
-                  );
-                },
-              ),
-            ),
-          if (_index == 3)
-            Padding(
-              padding: const EdgeInsets.only(right: 8.0),
-              child: IconButton(
-                icon: const Icon(Icons.group_add_outlined),
-                tooltip: 'Bağlantı istekleri',
-                onPressed: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const ConnectionRequestsScreen(),
-                    ),
-                  );
-                },
-              ),
-            ),
-        ],
-      ),
+      appBar: _buildAppBar(context),
       body: NotificationListener<UserScrollNotification>(
         onNotification: (notification) {
           if (notification.metrics.axis != Axis.vertical) return false;
@@ -1962,6 +2084,60 @@ class NotificationsTab extends StatelessWidget {
     return '${dt.day}.${dt.month}.${dt.year}';
   }
 
+  // ================= EMPTY STATE =================
+  Widget _buildEmptyState(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Transform.translate(
+          offset: const Offset(0, -90), // 👈 HER ŞEYİ yukarı alır
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              SizedBox(
+                width: 220,
+                height: 220,
+                child: Lottie.asset(
+                  'assets/lottie/no_item_found.json',
+                  repeat: true,
+                  fit: BoxFit.contain,
+                ),
+              ),
+
+              const SizedBox(height: 8),
+
+              Text(
+                'Henüz herhangi bir bildirim almadın',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w800,
+                  color: theme.colorScheme.onSurface,
+                ),
+              ),
+
+              const SizedBox(height: 6),
+
+              Text(
+                'Bildirim almaya başladıkça burada göreceksin.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 13,
+                  height: 1.35,
+                  color: AppColors.subtleText(theme),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+
+  // ================= BUILD =================
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -1972,10 +2148,12 @@ class NotificationsTab extends StatelessWidget {
         builder: (context, _) {
           final items = inAppNotificationService.items;
 
+          // 👇 EMPTY STATE
           if (items.isEmpty) {
-            return const Center(child: Text('Henüz bildirimin yok.'));
+            return _buildEmptyState(context);
           }
 
+          // 👇 NORMAL LIST
           return ListView.separated(
             padding: const EdgeInsets.all(12),
             itemCount: items.length,
@@ -2082,6 +2260,7 @@ class NotificationsTab extends StatelessWidget {
     );
   }
 }
+
 
 /// ======================= AI CAREER ADVISOR SHEET =======================
 class AiCareerAdvisorSheet extends StatefulWidget {

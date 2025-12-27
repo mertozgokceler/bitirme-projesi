@@ -28,6 +28,7 @@ dependencies:
   firebase_storage: ^12.0.2
   firebase_messaging: ^15.0.3
   flutter_local_notifications: ^17.1.2
+  cloud_functions: ^5.1.0
 
   # Diğer paketler
   http: ^1.1.0
@@ -48,6 +49,7 @@ dependencies:
   flutter_slidable: ^3.1.0
   flutter_markdown: ^0.7.3
   flutter_webrtc: ^0.12.0
+  lottie: ^3.1.0
 
 
 dev_dependencies:
@@ -67,6 +69,7 @@ flutter:
 
   assets:
     - .env
+    - assets/lottie/
 
     - assets/data/motivations.txt
     - assets/legal/terms_tr.md
@@ -81,6 +84,7 @@ flutter:
     - assets/images/profile_rozet.svg
     - assets/images/video_call.svg
     - assets/images/mailbox.svg
+    - assets/images/techconnect_logo_gold.png
 
     - assets/icons/google.png
     - assets/icons/github.png

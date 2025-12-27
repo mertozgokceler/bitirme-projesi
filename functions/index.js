@@ -10,10 +10,10 @@ const {
 } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions } = require("firebase-functions/v2/options");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore, FieldValue, FieldPath } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue, FieldPath, Timestamp } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getAuth } = require("firebase-admin/auth");
-const { onRequest } = require("firebase-functions/v2/https");
+const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
 
 // ========== V1 functions (config için) ==========
 const functions = require("firebase-functions");
@@ -2210,4 +2210,107 @@ exports.onUserProfileRecomputeMatches = onDocumentWritten("users/{uid}", async (
 exports.onJobDeletedCleanupMatches = onDocumentDeleted("jobs/{jobId}", async (event) => {
   const jobId = event.params.jobId;
   await cleanupMatchesForJob(jobId);
+});
+
+/* =========================================================
+   ✅ DEMO PREMIUM (Aylık / Yıllık)
+   Callable: completeDemoPaymentAndActivatePremium
+   planId: premium_monthly | premium_yearly
+   ========================================================= */
+
+exports.completeDemoPaymentAndActivatePremium = onCall(async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) {
+    throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
+  }
+
+  const { planId, clientTxId } = request.data || {};
+  if (!planId || !clientTxId) {
+    throw new HttpsError("invalid-argument", "Eksik parametre: planId/clientTxId");
+  }
+
+  const PLAN_DAYS = {
+    premium_monthly: 30,
+    premium_yearly: 365,
+  };
+
+  const daysToAdd = PLAN_DAYS[planId];
+  if (!daysToAdd) {
+    throw new HttpsError("invalid-argument", "Geçersiz planId.");
+  }
+
+  const db = getFirestore();
+  const userRef = db.collection("users").doc(uid);
+
+  // ✅ idempotency: aynı clientTxId tekrar gelirse ikinci kez süre eklemesin
+  const txRef = db.collection("premiumEvents").doc(`${uid}_${clientTxId}`);
+
+  let computedPremiumUntil = null;
+
+  await db.runTransaction(async (tx) => {
+    const [txSnap, userSnap] = await Promise.all([tx.get(txRef), tx.get(userRef)]);
+
+    // aynı tx tekrar geldiyse -> hiç dokunma (idempotent)
+    if (txSnap.exists) {
+      // mümkünse eski premiumUntil'ı response için al
+      if (userSnap.exists) {
+        const u = userSnap.data() || {};
+        if (u.premiumUntil && typeof u.premiumUntil.toDate === "function") {
+          computedPremiumUntil = u.premiumUntil;
+        }
+      }
+      return;
+    }
+
+    const now = Timestamp.now();
+
+    // aktif premium varsa üstüne ekle, yoksa now'dan başlat
+    let base = now;
+    if (userSnap.exists) {
+      const u = userSnap.data() || {};
+      const until = u.premiumUntil;
+      if (until && typeof until.toDate === "function" && until.toDate() > now.toDate()) {
+        base = until;
+      }
+    }
+
+    const premiumUntil = Timestamp.fromDate(
+      new Date(base.toDate().getTime() + daysToAdd * 24 * 60 * 60 * 1000)
+    );
+
+    computedPremiumUntil = premiumUntil;
+
+    // ✅ alanlar yoksa otomatik oluşur (merge:true)
+    tx.set(
+      userRef,
+      {
+        isPremium: true,
+        premiumUntil,
+        premiumPlan: planId,           // premium_monthly | premium_yearly
+        premiumSource: "demo",
+        premiumStartedAt: FieldValue.serverTimestamp(),
+        premiumUpdatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+
+    // log
+    tx.set(
+      txRef,
+      {
+        uid,
+        planId,
+        type: "demo_activation",
+        createdAt: FieldValue.serverTimestamp(),
+        premiumUntil,
+      },
+      { merge: true }
+    );
+  });
+
+  return {
+    isPremium: true,
+    planId,
+    premiumUntil: computedPremiumUntil, // Timestamp (client isterse gösterir)
+  };
 });
