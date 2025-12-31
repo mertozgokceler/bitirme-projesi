@@ -8,220 +8,272 @@ import '../screens/story_viewer_screen.dart';
 class StoriesStrip extends StatelessWidget {
   const StoriesStrip({super.key});
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _storiesStream() {
-    final now = Timestamp.now();
+  Stream<QuerySnapshot<Map<String, dynamic>>> _connectionsStream(String myUid) {
     return FirebaseFirestore.instance
-        .collection('stories')
-        .where('expiresAt', isGreaterThan: now)
-        .orderBy('expiresAt', descending: false)
-        .orderBy('updatedAt', descending: true)
+        .collection('connections')
+        .doc(myUid)
+        .collection('list')
         .limit(50)
         .snapshots();
   }
 
-  List<Map<String, dynamic>> _castItems(dynamic raw) {
-    if (raw is! List) return const [];
-    final out = <Map<String, dynamic>>[];
-    for (final e in raw) {
-      if (e is Map) out.add(Map<String, dynamic>.from(e));
-    }
-    return out;
+  // ✅ latest active item: expiresAt > now
+  Stream<QuerySnapshot<Map<String, dynamic>>> _latestActiveItemStream(String ownerUid) {
+    final now = Timestamp.now();
+    return FirebaseFirestore.instance
+        .collection('stories')
+        .doc(ownerUid)
+        .collection('items')
+        .where('expiresAt', isGreaterThan: now)
+        .orderBy('expiresAt', descending: true)
+        .limit(1)
+        .snapshots();
   }
 
-  List<Map<String, dynamic>> _validItems(dynamic raw) {
-    final items = _castItems(raw);
-    return items
-        .where((it) => (it['url'] ?? '').toString().trim().isNotEmpty)
-        .where((it) {
-      final t = (it['type'] ?? '').toString().trim();
-      return t == 'image' || t == 'video';
-    })
-        .toList();
-  }
-
-  bool _isNotExpired(dynamic expiresAt) {
-    try {
-      final ts = expiresAt is Timestamp ? expiresAt : null;
-      if (ts == null) return false;
-      return ts.toDate().isAfter(DateTime.now());
-    } catch (_) {
-      return false;
-    }
+  // ✅ seen doc: stories/{ownerUid}/seen/{viewerUid}
+  Stream<DocumentSnapshot<Map<String, dynamic>>> _seenDocStream({
+    required String ownerUid,
+    required String viewerUid,
+  }) {
+    return FirebaseFirestore.instance
+        .collection('stories')
+        .doc(ownerUid)
+        .collection('seen')
+        .doc(viewerUid)
+        .snapshots();
   }
 
   Future<void> _openMyStoryOrEditor({
     required BuildContext context,
-    required String uid,
-    required String ownerName,
-    required String ownerPhotoUrl,
+    required String myUid,
+    required String myName,
+    required String myPhotoUrl,
   }) async {
-    final ref = FirebaseFirestore.instance.collection('stories').doc(uid);
-    final snap = await ref.get();
-    if (!snap.exists) {
+    final now = Timestamp.now();
+
+    try {
+      final q = await FirebaseFirestore.instance
+          .collection('stories')
+          .doc(myUid)
+          .collection('items')
+          .where('expiresAt', isGreaterThan: now)
+          .orderBy('expiresAt', descending: true)
+          .limit(1)
+          .get();
+
       if (!context.mounted) return;
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const MyStoriesScreen()));
-      return;
-    }
 
-    final data = snap.data() ?? {};
-    final ok = _isNotExpired(data['expiresAt']);
-    final items = _validItems(data['items']);
+      final has = q.docs.isNotEmpty;
 
-    if (!context.mounted) return;
+      if (!has) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const MyStoriesScreen()),
+        );
+        return;
+      }
 
-    if (ok && items.isNotEmpty) {
       Navigator.push(
         context,
         MaterialPageRoute(
           builder: (_) => StoryViewerScreen(
-            ownerUid: uid,
-            ownerName: ownerName.trim().isEmpty ? 'Ben' : ownerName.trim(),
-            ownerPhotoUrl: ownerPhotoUrl.trim(),
-            items: items,
+            ownerUid: myUid,
+            ownerName: myName.trim().isEmpty ? 'Ben' : myName.trim(),
+            ownerPhotoUrl: myPhotoUrl.trim(),
           ),
         ),
       );
-    } else {
-      Navigator.push(context, MaterialPageRoute(builder: (_) => const MyStoriesScreen()));
+    } catch (_) {
+      if (!context.mounted) return;
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const MyStoriesScreen()),
+      );
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
     final me = FirebaseAuth.instance.currentUser;
     if (me == null) return const SizedBox.shrink();
-
     final myUid = me.uid;
 
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-      padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: cs.outline.withOpacity(0.75)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Hikayeler',
-            style: TextStyle(
-              color: cs.onSurface,
-              fontSize: 18,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: 10),
-          SizedBox(
-            height: 96,
-            child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-              stream: _storiesStream(),
-              builder: (context, snap) {
-                final docs = snap.data?.docs ?? const [];
+    return SizedBox(
+      height: 96,
+      child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: _connectionsStream(myUid),
+        builder: (context, connSnap) {
+          final connDocs = connSnap.data?.docs ?? const [];
+          final otherUids = connDocs.map((d) => d.id).toList();
 
-                return ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: 1 + docs.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 12),
-                  itemBuilder: (context, i) {
-                    if (i == 0) {
-                      return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                        stream: FirebaseFirestore.instance.collection('users').doc(myUid).snapshots(),
-                        builder: (context, us) {
-                          final u = us.data?.data() ?? {};
-                          final myPhoto = (u['photoUrl'] ??
-                              u['photoURL'] ??
-                              u['profilePhotoUrl'] ??
-                              u['userPhotoUrl'] ??
-                              '')
-                              .toString()
-                              .trim();
+          return ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              // -----------------------
+              // 0) MY TILE
+              // -----------------------
+              StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                stream: FirebaseFirestore.instance.collection('users').doc(myUid).snapshots(),
+                builder: (context, us) {
+                  final u = us.data?.data() ?? {};
 
-                          final myName = (u['name'] ??
-                              u['userName'] ??
-                              u['username'] ??
-                              u['companyName'] ??
-                              'Ben')
-                              .toString()
-                              .trim();
+                  final myPhoto = (u['photoUrl'] ??
+                      u['photoURL'] ??
+                      u['profilePhotoUrl'] ??
+                      u['userPhotoUrl'] ??
+                      '')
+                      .toString()
+                      .trim();
 
-                          return _AddStoryTile(
-                            photoUrl: myPhoto.isEmpty ? null : myPhoto,
-                            onTap: () {
-                              _openMyStoryOrEditor(
-                                context: context,
-                                uid: myUid,
-                                ownerName: myName,
-                                ownerPhotoUrl: myPhoto,
-                              );
-                            },
-                          );
-                        },
-                      );
-                    }
+                  final myName = (u['name'] ??
+                      u['userName'] ??
+                      u['username'] ??
+                      u['companyName'] ??
+                      'Ben')
+                      .toString()
+                      .trim();
 
-                    final d = docs[i - 1];
-                    final s = d.data();
+                  return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                    stream: _latestActiveItemStream(myUid),
+                    builder: (context, myItemSnap) {
+                      final hasMyStory = (myItemSnap.data?.docs ?? const []).isNotEmpty;
 
-                    final ownerUid = d.id;
-                    final ownerName = (s['userName'] ?? 'Kullanıcı').toString().trim();
-                    final ownerPhotoUrl = (s['userPhotoUrl'] ?? '').toString().trim();
-
-                    final items = _validItems(s['items']);
-                    final hasVideo = items.any((it) => (it['type'] ?? '').toString() == 'video');
-
-                    return _StoryTile(
-                      name: ownerName.isEmpty ? 'Kullanıcı' : ownerName,
-                      photoUrl: ownerPhotoUrl.isEmpty ? null : ownerPhotoUrl,
-                      hasVideo: hasVideo,
-                      onTap: items.isEmpty
-                          ? () {}
-                          : () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => StoryViewerScreen(
-                              ownerUid: ownerUid,
-                              ownerName: ownerName.isEmpty ? 'Kullanıcı' : ownerName,
-                              ownerPhotoUrl: ownerPhotoUrl,
-                              items: items,
-                            ),
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 12),
+                        child: _AddStoryTile(
+                          photoUrl: myPhoto.isEmpty ? null : myPhoto,
+                          showActiveRing: hasMyStory,
+                          onTap: () => _openMyStoryOrEditor(
+                            context: context,
+                            myUid: myUid,
+                            myName: myName,
+                            myPhotoUrl: myPhoto,
                           ),
+                          onLongPress: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (_) => const MyStoriesScreen()),
+                            );
+                          },
+                        ),
+                      );
+                    },
+                  );
+                },
+              ),
+
+              // -----------------------
+              // 1) OTHERS (NO HOLES)
+              // -----------------------
+              for (final otherUid in otherUids)
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: _latestActiveItemStream(otherUid),
+                  builder: (context, itemSnap) {
+                    final docs = itemSnap.data?.docs ?? const [];
+                    if (docs.isEmpty) return const SizedBox.shrink();
+
+                    final item = docs.first.data();
+                    final type = (item['type'] ?? '').toString().trim().toLowerCase();
+                    final hasVideo = type == 'video';
+
+                    // ✅ kıyas için stabil alan: expiresAt
+                    final latestExpiresAt = item['expiresAt'];
+
+                    return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                      stream: FirebaseFirestore.instance.collection('users').doc(otherUid).snapshots(),
+                      builder: (context, uSnap) {
+                        final u = uSnap.data?.data() ?? {};
+                        final name = (u['name'] ?? u['username'] ?? u['userName'] ?? 'Kullanıcı')
+                            .toString()
+                            .trim();
+                        final photo = (u['photoUrl'] ?? '').toString().trim();
+
+                        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                          stream: _seenDocStream(ownerUid: otherUid, viewerUid: myUid),
+                          builder: (context, seenSnap) {
+                            final seenData = seenSnap.data?.data() ?? {};
+
+                            // ✅ viewer yazacağı alan:
+                            // lastSeenExpiresAt
+                            final lastSeenExpiresAt = seenData['lastSeenExpiresAt'];
+
+                            bool isSeen = false;
+                            if (lastSeenExpiresAt is Timestamp && latestExpiresAt is Timestamp) {
+                              isSeen = lastSeenExpiresAt.compareTo(latestExpiresAt) >= 0;
+                            }
+
+                            return Padding(
+                              padding: const EdgeInsets.only(right: 12),
+                              child: _StoryTile(
+                                name: name.isEmpty ? 'Kullanıcı' : name,
+                                photoUrl: photo.isEmpty ? null : photo,
+                                hasVideo: hasVideo,
+                                isSeen: isSeen,
+                                onTap: () {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => StoryViewerScreen(
+                                        ownerUid: otherUid,
+                                        ownerName: name.isEmpty ? 'Kullanıcı' : name,
+                                        ownerPhotoUrl: photo,
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
+                            );
+                          },
                         );
                       },
                     );
                   },
-                );
-              },
-            ),
-          ),
-        ],
+                ),
+            ],
+          );
+        },
       ),
     );
   }
 }
 
+// ---------------------------
+// Tiles
+// ---------------------------
 class _AddStoryTile extends StatelessWidget {
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
   final String? photoUrl;
+  final bool showActiveRing;
 
   const _AddStoryTile({
     required this.onTap,
+    this.onLongPress,
     required this.photoUrl,
+    required this.showActiveRing,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
+
     final hasPhoto = (photoUrl ?? '').trim().isNotEmpty;
+
+    final ringColor = showActiveRing
+        ? cs.primary.withOpacity(isDark ? 0.80 : 0.85)
+        : cs.outline.withOpacity(isDark ? 0.55 : 0.65);
+
+    final innerBg = cs.surface;
+    final labelColor = cs.onSurface.withOpacity(0.85);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(18),
         child: SizedBox(
           width: 78,
           child: Column(
@@ -231,19 +283,30 @@ class _AddStoryTile extends StatelessWidget {
                 clipBehavior: Clip.none,
                 children: [
                   Container(
-                    width: 62,
-                    height: 62,
-                    padding: const EdgeInsets.all(2),
+                    width: 64,
+                    height: 64,
+                    padding: const EdgeInsets.all(2.4),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: cs.primary.withOpacity(0.75), width: 2),
+                      gradient: LinearGradient(
+                        colors: [ringColor, ringColor.withOpacity(0.45)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
                     ),
-                    child: CircleAvatar(
-                      backgroundColor: cs.surface,
-                      backgroundImage: hasPhoto ? NetworkImage(photoUrl!.trim()) : null,
-                      child: !hasPhoto
-                          ? Icon(Icons.person, color: cs.onSurface.withOpacity(0.70))
-                          : null,
+                    child: Container(
+                      padding: const EdgeInsets.all(1.6),
+                      decoration: BoxDecoration(
+                        color: innerBg,
+                        shape: BoxShape.circle,
+                      ),
+                      child: CircleAvatar(
+                        backgroundColor: innerBg,
+                        backgroundImage: hasPhoto ? NetworkImage(photoUrl!.trim()) : null,
+                        child: !hasPhoto
+                            ? Icon(Icons.person, color: cs.onSurface.withOpacity(0.70))
+                            : null,
+                      ),
                     ),
                   ),
                   Positioned(
@@ -255,22 +318,29 @@ class _AddStoryTile extends StatelessWidget {
                       decoration: BoxDecoration(
                         color: cs.primary,
                         shape: BoxShape.circle,
-                        border: Border.all(color: cs.surface, width: 2),
+                        border: Border.all(color: innerBg, width: 2),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(isDark ? 0.25 : 0.10),
+                            blurRadius: 10,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
                       ),
                       child: Icon(Icons.add_rounded, size: 14, color: cs.onPrimary),
                     ),
                   ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 7),
               Text(
-                'Benim',
+                'Hikayen',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
-                  color: cs.onSurface.withOpacity(0.85),
+                  color: labelColor,
                 ),
               ),
             ],
@@ -281,11 +351,11 @@ class _AddStoryTile extends StatelessWidget {
   }
 }
 
-
 class _StoryTile extends StatelessWidget {
   final String name;
   final String? photoUrl;
   final bool hasVideo;
+  final bool isSeen;
   final VoidCallback onTap;
 
   const _StoryTile({
@@ -293,18 +363,30 @@ class _StoryTile extends StatelessWidget {
     required this.onTap,
     this.photoUrl,
     this.hasVideo = false,
+    this.isSeen = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
+
     final hasPhoto = (photoUrl ?? '').trim().isNotEmpty;
+
+    // ✅ izlendiyse gri, izlenmediyse primary
+    final ring = isSeen
+        ? cs.outline.withOpacity(isDark ? 0.55 : 0.65)
+        : cs.primary.withOpacity(isDark ? 0.72 : 0.78);
+
+    final innerBg = cs.surface;
+    final labelColor = cs.onSurface.withOpacity(0.85);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(18),
         child: SizedBox(
           width: 78,
           child: Column(
@@ -313,19 +395,30 @@ class _StoryTile extends StatelessWidget {
               Stack(
                 children: [
                   Container(
-                    width: 62,
-                    height: 62,
-                    padding: const EdgeInsets.all(2),
+                    width: 64,
+                    height: 64,
+                    padding: const EdgeInsets.all(2.4),
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      border: Border.all(color: cs.primary.withOpacity(0.75), width: 2),
+                      gradient: LinearGradient(
+                        colors: [ring, ring.withOpacity(0.45)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
                     ),
-                    child: CircleAvatar(
-                      backgroundColor: cs.surface,
-                      backgroundImage: hasPhoto ? NetworkImage(photoUrl!.trim()) : null,
-                      child: !hasPhoto
-                          ? Icon(Icons.person, color: cs.onSurface.withOpacity(0.70))
-                          : null,
+                    child: Container(
+                      padding: const EdgeInsets.all(1.6),
+                      decoration: BoxDecoration(
+                        color: innerBg,
+                        shape: BoxShape.circle,
+                      ),
+                      child: CircleAvatar(
+                        backgroundColor: innerBg,
+                        backgroundImage: hasPhoto ? NetworkImage(photoUrl!.trim()) : null,
+                        child: !hasPhoto
+                            ? Icon(Icons.person, color: cs.onSurface.withOpacity(0.70))
+                            : null,
+                      ),
                     ),
                   ),
                   if (hasVideo)
@@ -338,14 +431,14 @@ class _StoryTile extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: cs.primary,
                           shape: BoxShape.circle,
-                          border: Border.all(color: cs.surface, width: 2),
+                          border: Border.all(color: innerBg, width: 2),
                         ),
                         child: Icon(Icons.videocam_rounded, size: 12, color: cs.onPrimary),
                       ),
                     ),
                 ],
               ),
-              const SizedBox(height: 6),
+              const SizedBox(height: 7),
               Text(
                 name,
                 maxLines: 1,
@@ -353,7 +446,7 @@ class _StoryTile extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
-                  color: cs.onSurface.withOpacity(0.85),
+                  color: labelColor,
                 ),
               ),
             ],

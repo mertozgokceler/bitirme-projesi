@@ -3,6 +3,7 @@
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:lottie/lottie.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:firebase_auth/firebase_auth.dart';
@@ -89,6 +90,49 @@ class _HomeTabState extends State<HomeTab> {
       if (mounted) setState(() => _isLoadingUserData = false);
     }
   }
+
+  Widget _buildStoriesSection() {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+      decoration: BoxDecoration(
+        color: cs.surface.withOpacity(isDark ? 0.78 : 0.92),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: cs.outline.withOpacity(0.75)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.22 : 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                'Hikayeler',
+                style: t.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: cs.onSurface,
+                ),
+              ),
+              const Spacer(),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const StoriesStrip(),
+        ],
+      ),
+    );
+  }
+
 
   // =========================================================
   // MOTIVATION
@@ -391,8 +435,8 @@ class _HomeTabState extends State<HomeTab> {
             const SizedBox(height: 10),
             _buildNewsSection(),
             const SizedBox(height: 10),
-            const StoriesStrip(),
-            const SizedBox(height: 6),
+            _buildStoriesSection(),
+            const SizedBox(height: 10),
             _buildFeedFromPosts(),
           ],
         ),
@@ -540,7 +584,7 @@ class _HomeTabState extends State<HomeTab> {
 
             // ✅ sabit yükseklik
             firstChild: SizedBox(
-              height: 196,
+              height: 180,
               child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                 stream: _topMatchStream(),
                 builder: (context, snapshot) {
@@ -916,27 +960,73 @@ class _HomeTabState extends State<HomeTab> {
   Widget _emptySuggestions() {
     final cs = Theme.of(context).colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cs.surface,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: cs.outline),
-      ),
-      child: Row(
-        children: [
-          Icon(Icons.auto_awesome, color: cs.primary),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Henüz sana özel eşleşme yok. Profilini güçlendirdikçe ve yeni ilanlar geldikçe burada göreceksin.',
-              style: TextStyle(color: cs.onSurface.withOpacity(0.8)),
+    return SizedBox(
+      height: 180, // 🔒 KRİTİK: taşmayı bitiren kilit
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+        decoration: BoxDecoration(
+          color: cs.surface,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: cs.outline),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // 🎞️ ANİMASYON (ORTADA)
+            SizedBox(
+              height: 78, // ⬅️ daha küçüğü gerekmez
+              child: Lottie.asset(
+                'assets/lottie/empty2.json',
+                repeat: true,
+                fit: BoxFit.contain,
+              ),
             ),
-          ),
-        ],
+
+            const SizedBox(height: 8),
+
+            // ✨ BAŞLIK
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.auto_awesome, size: 16, color: cs.primary),
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    'Henüz sana özel eşleşme yok',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.6,
+                      fontWeight: FontWeight.w800,
+                      color: cs.onSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 6),
+
+            // 📌 AÇIKLAMA
+            Text(
+              'Profilini güçlendirdikçe ve yeni ilanlar geldikçe burada sana özel eşleşmeleri göreceksin.',
+              textAlign: TextAlign.center,
+              maxLines: 3, // 🔒
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 11.2,
+                height: 1.15,
+                fontWeight: FontWeight.w600,
+                color: cs.onSurface.withOpacity(0.72),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
+
 
   // ================== GÜNDEM ==================
   Widget _buildNewsSection() {

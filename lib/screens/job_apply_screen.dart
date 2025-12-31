@@ -43,19 +43,18 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
 
   late final List<String> _steps;
 
+  bool get _isLast => _page == _steps.length - 1;
+
   @override
   void initState() {
     super.initState();
 
     final order = ['phone', 'email', 'cv', 'portfolio', 'linkedin', 'coverLetter'];
     _steps = order.where(_isOn).toList();
-
-    // hiç alan seçilmediyse email zorunlu olsun
     if (_steps.isEmpty) _steps.add('email');
 
-    // email varsa auto doldur
     final u = FirebaseAuth.instance.currentUser;
-    if (u != null && (_emailCtrl.text.trim().isEmpty)) {
+    if (u != null && _emailCtrl.text.trim().isEmpty) {
       final em = (u.email ?? '').trim();
       if (em.isNotEmpty) _emailCtrl.text = em;
     }
@@ -72,7 +71,23 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
     super.dispose();
   }
 
-  String _jobTitle() => (widget.job['title'] ?? 'Başvuru').toString();
+  // -------------------- helpers --------------------
+
+  String _jobTitle() => (widget.job['title'] ?? 'Başvuru').toString().trim().isEmpty
+      ? 'Başvuru'
+      : (widget.job['title'] ?? 'Başvuru').toString().trim();
+
+  String _companyName() =>
+      (widget.job['companyName'] ?? 'Şirket').toString().trim().isEmpty
+          ? 'Şirket'
+          : (widget.job['companyName'] ?? 'Şirket').toString().trim();
+
+  String _location() => (widget.job['location'] ?? 'Konum')
+      .toString()
+      .trim()
+      .isEmpty
+      ? 'Konum'
+      : (widget.job['location'] ?? 'Konum').toString().trim();
 
   String _labelFor(String key) {
     switch (key) {
@@ -92,6 +107,46 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
         return key;
     }
   }
+
+  String _descFor(String key) {
+    switch (key) {
+      case 'phone':
+        return 'Hızlı iletişim için kullanılır.';
+      case 'email':
+        return 'Başvurunla ilgili dönüş bu adrese gelir.';
+      case 'cv':
+        return 'PDF/DOC/DOCX yükleyebilirsin.';
+      case 'portfolio':
+        return 'Projelerini tek linkte göster.';
+      case 'linkedin':
+        return 'Profilin ile kendini öne çıkar.';
+      case 'coverLetter':
+        return 'Kısa ve net: neden sen?';
+      default:
+        return '';
+    }
+  }
+
+  IconData _iconFor(String key) {
+    switch (key) {
+      case 'phone':
+        return Icons.phone_rounded;
+      case 'email':
+        return Icons.alternate_email_rounded;
+      case 'cv':
+        return Icons.upload_file_rounded;
+      case 'portfolio':
+        return Icons.language_rounded;
+      case 'linkedin':
+        return Icons.badge_rounded;
+      case 'coverLetter':
+        return Icons.edit_note_rounded;
+      default:
+        return Icons.check_circle_outline_rounded;
+    }
+  }
+
+  // -------------------- validation --------------------
 
   bool _validateStep(String step) {
     switch (step) {
@@ -127,11 +182,20 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
       case 'linkedin':
         return 'LinkedIn linki boş olamaz.';
       case 'coverLetter':
-        return 'Ön yazı boş olamaz (en az 30 karakter).';
+        return 'Ön yazı en az 30 karakter olmalı.';
       default:
         return 'Bu adım eksik.';
     }
   }
+
+  void _snack(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg)),
+    );
+  }
+
+  // -------------------- file pick/upload --------------------
 
   Future<void> _pickCv() async {
     try {
@@ -147,10 +211,7 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
         _cvDownloadUrl = null;
       });
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Dosya seçme hatası: $e')),
-      );
+      _snack('Dosya seçme hatası: $e');
     }
   }
 
@@ -177,60 +238,50 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
           .child(user.uid)
           .child(fileName);
 
-      await ref.putFile(
-        File(path),
-        SettableMetadata(contentType: 'application/octet-stream'),
-      );
+      await ref.putFile(File(path));
 
       final url = await ref.getDownloadURL();
       if (mounted) setState(() => _cvDownloadUrl = url);
       return url;
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('CV yükleme hatası: $e')),
-        );
-      }
+      _snack('CV yükleme hatası: $e');
       return null;
     } finally {
       if (mounted) setState(() => _uploadingCv = false);
     }
   }
 
+  // -------------------- navigation --------------------
+
   Future<void> _next() async {
     final step = _steps[_page];
 
     if (step == 'cv') {
       if (_cvFile == null && _cvDownloadUrl == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_errorFor(step))),
-        );
+        _snack(_errorFor(step));
         return;
       }
       final url = await _uploadCvIfNeeded();
       if (url == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('CV yüklenemedi.')),
-        );
+        _snack('CV yüklenemedi.');
         return;
       }
     } else {
       if (!_validateStep(step)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(_errorFor(step))),
-        );
+        _snack(_errorFor(step));
         return;
       }
     }
 
-    if (_page < _steps.length - 1) {
-      _pageCtrl.nextPage(
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-      );
-    } else {
+    if (_isLast) {
       await _submit();
+      return;
     }
+
+    _pageCtrl.nextPage(
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _back() {
@@ -239,10 +290,12 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
       return;
     }
     _pageCtrl.previousPage(
-      duration: const Duration(milliseconds: 220),
-      curve: Curves.easeOut,
+      duration: const Duration(milliseconds: 240),
+      curve: Curves.easeOutCubic,
     );
   }
+
+  // -------------------- submit --------------------
 
   Future<void> _submit() async {
     if (_submitting) return;
@@ -251,31 +304,24 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
       if (s == 'cv') {
         final url = await _uploadCvIfNeeded();
         if (url == null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('CV zorunlu ama yüklenemedi.')),
-          );
+          _snack('CV zorunlu ama yüklenemedi.');
           return;
         }
       } else if (!_validateStep(s)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Eksik adım: ${_labelFor(s)}')),
-        );
+        _snack('Eksik adım: ${_labelFor(s)}');
         return;
       }
     }
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Giriş yapmış kullanıcı yok.')),
-      );
+      _snack('Giriş yapmış kullanıcı yok.');
       return;
     }
 
     setState(() => _submitting = true);
 
     try {
-      // ✅ users/{uid} snapshot çek -> applicantName boş kalmasın
       final userDoc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
@@ -302,11 +348,8 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
         'applicantUsername': username,
         'applicantPhotoUrl': photoUrl,
         'applicantEmailAuth': (user.email ?? '').trim(),
-
         'createdAt': FieldValue.serverTimestamp(),
         'status': 'new',
-
-        // ✅ collectionGroup query için
         'jobId': widget.jobId,
         'jobTitle': widget.job['title'],
         'companyId': widget.job['companyId'],
@@ -327,142 +370,295 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
           .add(data);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Başvurun gönderildi.')),
-      );
+      _snack('Başvurun gönderildi 🎉');
       Navigator.pop(context);
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Başvuru kaydı hatası: $e')),
-      );
+      _snack('Başvuru kaydı hatası: $e');
     } finally {
       if (mounted) setState(() => _submitting = false);
     }
   }
 
-  Widget _dots() {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: List.generate(_steps.length, (i) {
-        final active = i == _page;
-        return AnimatedContainer(
-          duration: const Duration(milliseconds: 160),
-          margin: const EdgeInsets.symmetric(horizontal: 4),
-          width: active ? 18 : 7,
-          height: 7,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(999),
-            color: active
-                ? Theme.of(context).colorScheme.primary
-                : Colors.grey.withOpacity(0.35),
-          ),
-        );
-      }),
+  // -------------------- premium UI bits --------------------
+
+  List<Color> _heroGradient(bool isDark) {
+    if (isDark) {
+      return const [
+        Color(0xFF6D5DF6),
+        Color(0xFF4FC3F7),
+        Color(0xFF00E5FF),
+      ];
+    }
+    return const [
+      Color(0xFF5C7CFA),
+      Color(0xFF4FC3F7),
+      Color(0xFF7C4DFF),
+    ];
+  }
+
+  Color _glassBg(bool isDark) => isDark
+      ? const Color(0xFF11121A).withOpacity(0.78)
+      : Colors.white.withOpacity(0.78);
+
+  Color _glassBorder(bool isDark) => isDark
+      ? Colors.white.withOpacity(0.10)
+      : Colors.black.withOpacity(0.08);
+
+  Widget _pillCounter(bool isDark) {
+    final t = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: isDark ? Colors.white.withOpacity(0.12) : Colors.white.withOpacity(0.22),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: isDark ? Colors.white.withOpacity(0.10) : Colors.white.withOpacity(0.25),
+          width: 1,
+        ),
+      ),
+      child: Text(
+        '${_page + 1}/${_steps.length}',
+        style: t.textTheme.labelLarge?.copyWith(
+          color: Colors.white,
+          fontWeight: FontWeight.w900,
+          letterSpacing: 0.3,
+        ),
+      ),
     );
   }
 
-  Widget _cardShell({required Widget child}) {
-    return Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 520),
-        child: Card(
-          elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: child,
+  Widget _progressBar(bool isDark) {
+    final total = _steps.length;
+    final p = total <= 1 ? 1.0 : (_page + 1) / total;
+
+    return Container(
+      height: 8,
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(isDark ? 0.16 : 0.22),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 240),
+          curve: Curves.easeOutCubic,
+          width: MediaQuery.of(context).size.width * 0.78 * p,
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(999),
+            gradient: LinearGradient(
+              colors: const [Color(0xFFFFFFFF), Color(0xFFB3E5FC)],
+              begin: Alignment.centerLeft,
+              end: Alignment.centerRight,
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _stepWidget(String step) {
-    switch (step) {
-      case 'phone':
-        return _cardShell(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+  Widget _stepCard({
+    required bool isDark,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    required Widget child,
+  }) {
+    final t = Theme.of(context);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _glassBg(isDark),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _glassBorder(isDark), width: 1),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.40 : 0.10),
+            blurRadius: 22,
+            offset: const Offset(0, 14),
+          ),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [
+          Row(
             children: [
-              Text(_labelFor(step),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _phoneCtrl,
-                keyboardType: TextInputType.phone,
-                decoration: const InputDecoration(
-                  hintText: '05xx xxx xx xx',
-                  border: OutlineInputBorder(),
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  gradient: LinearGradient(
+                    colors: isDark
+                        ? const [Color(0xFF6D5DF6), Color(0xFF4FC3F7)]
+                        : const [Color(0xFF5C7CFA), Color(0xFF4FC3F7)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: (isDark ? const Color(0xFF6D5DF6) : const Color(0xFF5C7CFA))
+                          .withOpacity(0.35),
+                      blurRadius: 18,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Icon(icon, color: Colors.white, size: 26),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: t.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        letterSpacing: 0.2,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: t.textTheme.bodySmall?.copyWith(
+                        height: 1.25,
+                        fontWeight: FontWeight.w700,
+                        color: isDark ? Colors.white.withOpacity(0.72) : const Color(0xFF475569),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
+          ),
+          const SizedBox(height: 14),
+          child,
+        ],
+      ),
+    );
+  }
+
+  InputDecoration _premiumInput({
+    required bool isDark,
+    required String hint,
+    required IconData icon,
+  }) {
+    final base = OutlineInputBorder(
+      borderRadius: BorderRadius.circular(18),
+      borderSide: BorderSide(
+        color: isDark ? Colors.white.withOpacity(0.10) : Colors.black.withOpacity(0.10),
+        width: 1,
+      ),
+    );
+
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: TextStyle(
+        color: isDark ? Colors.white.withOpacity(0.55) : Colors.black.withOpacity(0.45),
+        fontWeight: FontWeight.w700,
+      ),
+      prefixIcon: Icon(icon, size: 20, color: isDark ? Colors.white.withOpacity(0.80) : const Color(0xFF334155)),
+      filled: true,
+      fillColor: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.03),
+      border: base,
+      enabledBorder: base,
+      focusedBorder: base.copyWith(
+        borderSide: BorderSide(
+          color: isDark ? const Color(0xFF4FC3F7).withOpacity(0.70) : const Color(0xFF5C7CFA).withOpacity(0.70),
+          width: 1.4,
+        ),
+      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+    );
+  }
+
+  Widget _buildStepWidget(bool isDark, String step) {
+    final t = Theme.of(context);
+
+    switch (step) {
+      case 'phone':
+        return _stepCard(
+          isDark: isDark,
+          icon: _iconFor(step),
+          title: _labelFor(step),
+          subtitle: _descFor(step),
+          child: TextField(
+            controller: _phoneCtrl,
+            keyboardType: TextInputType.phone,
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+              fontWeight: FontWeight.w800,
+            ),
+            decoration: _premiumInput(
+              isDark: isDark,
+              hint: '05xx xxx xx xx',
+              icon: Icons.phone_rounded,
+            ),
           ),
         );
 
       case 'email':
-        return _cardShell(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(_labelFor(step),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _emailCtrl,
-                keyboardType: TextInputType.emailAddress,
-                decoration: const InputDecoration(
-                  hintText: 'ornek@mail.com',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
+        return _stepCard(
+          isDark: isDark,
+          icon: _iconFor(step),
+          title: _labelFor(step),
+          subtitle: _descFor(step),
+          child: TextField(
+            controller: _emailCtrl,
+            keyboardType: TextInputType.emailAddress,
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+              fontWeight: FontWeight.w800,
+            ),
+            decoration: _premiumInput(
+              isDark: isDark,
+              hint: 'ornek@mail.com',
+              icon: Icons.alternate_email_rounded,
+            ),
           ),
         );
 
       case 'cv':
-        return _cardShell(
+        return _stepCard(
+          isDark: isDark,
+          icon: _iconFor(step),
+          title: _labelFor(step),
+          subtitle: _descFor(step),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_labelFor(step),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey.withOpacity(0.35)),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                decoration: BoxDecoration(
+                  color: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.03),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                    color: isDark ? Colors.white.withOpacity(0.10) : Colors.black.withOpacity(0.10),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.description_rounded,
+                        size: 20,
+                        color: isDark ? Colors.white.withOpacity(0.80) : const Color(0xFF334155)),
+                    const SizedBox(width: 10),
+                    Expanded(
                       child: Text(
                         _cvFile?.name ??
                             (_cvDownloadUrl != null ? 'CV yüklendi ✅' : 'Henüz dosya seçilmedi'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: t.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        ),
                       ),
                     ),
-                  ),
-                  const SizedBox(width: 10),
-                  ElevatedButton.icon(
-                    onPressed: _uploadingCv ? null : _pickCv,
-                    icon: const Icon(Icons.upload_file),
-                    label: const Text('Seç'),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              if (_cvFile != null && _cvDownloadUrl == null)
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        _uploadingCv ? 'Yükleniyor...' : 'İleri dediğinde CV otomatik yüklenecek.',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                    ),
+                    const SizedBox(width: 10),
                     if (_uploadingCv)
                       const SizedBox(
                         width: 18,
@@ -471,142 +667,393 @@ class _JobApplyScreenState extends State<JobApplyScreen> {
                       ),
                   ],
                 ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: _uploadingCv ? null : _pickCv,
+                      icon: const Icon(Icons.upload_file_rounded),
+                      label: const Text('Dosya Seç'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: isDark ? Colors.white : const Color(0xFF0F172A),
+                        side: BorderSide(
+                          color: isDark ? Colors.white.withOpacity(0.18) : Colors.black.withOpacity(0.14),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _cvFile != null && _cvDownloadUrl == null
+                    ? (_uploadingCv ? 'Yükleniyor...' : 'İlerle dediğinde CV otomatik yüklenecek.')
+                    : 'PDF/DOC/DOCX desteklenir.',
+                style: t.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white.withOpacity(0.65) : const Color(0xFF475569),
+                ),
+              ),
             ],
           ),
         );
 
       case 'portfolio':
-        return _cardShell(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(_labelFor(step),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _portfolioCtrl,
-                decoration: const InputDecoration(
-                  hintText: 'https://...',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
+        return _stepCard(
+          isDark: isDark,
+          icon: _iconFor(step),
+          title: _labelFor(step),
+          subtitle: _descFor(step),
+          child: TextField(
+            controller: _portfolioCtrl,
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+              fontWeight: FontWeight.w800,
+            ),
+            decoration: _premiumInput(
+              isDark: isDark,
+              hint: 'https://...',
+              icon: Icons.language_rounded,
+            ),
           ),
         );
 
       case 'linkedin':
-        return _cardShell(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(_labelFor(step),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
-              TextField(
-                controller: _linkedinCtrl,
-                decoration: const InputDecoration(
-                  hintText: 'https://linkedin.com/in/...',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-            ],
+        return _stepCard(
+          isDark: isDark,
+          icon: _iconFor(step),
+          title: _labelFor(step),
+          subtitle: _descFor(step),
+          child: TextField(
+            controller: _linkedinCtrl,
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+              fontWeight: FontWeight.w800,
+            ),
+            decoration: _premiumInput(
+              isDark: isDark,
+              hint: 'https://linkedin.com/in/...',
+              icon: Icons.badge_rounded,
+            ),
           ),
         );
 
       case 'coverLetter':
-        return _cardShell(
+        return _stepCard(
+          isDark: isDark,
+          icon: _iconFor(step),
+          title: _labelFor(step),
+          subtitle: _descFor(step),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(_labelFor(step),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-              const SizedBox(height: 10),
               TextField(
                 controller: _coverCtrl,
-                minLines: 5,
+                minLines: 6,
                 maxLines: 10,
-                decoration: const InputDecoration(
-                  hintText: 'Kısaca kendini anlat, neden uygunsun...',
-                  border: OutlineInputBorder(),
+                style: TextStyle(
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  fontWeight: FontWeight.w800,
+                ),
+                decoration: _premiumInput(
+                  isDark: isDark,
+                  hint: 'Kısaca kendini anlat, neden uygunsun...',
+                  icon: Icons.edit_note_rounded,
                 ),
               ),
-              const SizedBox(height: 6),
-              Text('En az 30 karakter yaz.',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+              const SizedBox(height: 8),
+              Text(
+                'En az 30 karakter yaz.',
+                style: t.textTheme.bodySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? Colors.white.withOpacity(0.65) : const Color(0xFF475569),
+                ),
+              ),
             ],
           ),
         );
 
       default:
-        return _cardShell(child: Text('Bilinmeyen adım: $step'));
+        return const SizedBox.shrink();
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final title = _jobTitle();
+  Widget _bottomBar(bool isDark) {
+    final t = Theme.of(context);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Başvuru')),
-      body: SafeArea(
-        child: Column(
+    final String primaryLabel = _isLast ? 'Başvur' : 'İlerle';
+
+    final bool disabled = _submitting || _uploadingCv;
+
+    final Color applyTextColor = isDark ? const Color(0xFF0B1220) : Colors.white; // daha koyu
+    final TextStyle applyTextStyle = t.textTheme.titleMedium!.copyWith(
+      fontWeight: FontWeight.w900,
+      letterSpacing: 0.2,
+      color: applyTextColor,
+    );
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+        child: Row(
           children: [
-            const SizedBox(height: 10),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Text(
-                title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16),
-                textAlign: TextAlign.center,
-              ),
-            ),
-            const SizedBox(height: 10),
-            _dots(),
-            const SizedBox(height: 10),
             Expanded(
-              child: PageView.builder(
-                controller: _pageCtrl,
-                itemCount: _steps.length,
-                physics: const BouncingScrollPhysics(),
-                onPageChanged: (i) => setState(() => _page = i),
-                itemBuilder: (context, i) {
-                  return Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: _stepWidget(_steps[i]),
-                  );
-                },
+              child: OutlinedButton(
+                onPressed: disabled ? null : _back,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: isDark ? Colors.white.withOpacity(0.92) : const Color(0xFF0F172A),
+                  side: BorderSide(
+                    color: isDark ? Colors.white.withOpacity(0.14) : Colors.black.withOpacity(0.10),
+                    width: 1,
+                  ),
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                  backgroundColor: isDark ? Colors.white.withOpacity(0.06) : Colors.black.withOpacity(0.02),
+                ),
+                child: Text(
+                  _page == 0 ? 'Vazgeç' : 'Geri',
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton(
-                      onPressed: (_submitting || _uploadingCv) ? null : _back,
-                      child: Text(_page == 0 ? 'Vazgeç' : 'Geri'),
-                    ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: isDark
+                  ? DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: const [Color(0xFF6D5DF6), Color(0xFF4FC3F7)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: (_submitting || _uploadingCv) ? null : _next,
-                      child: _submitting
-                          ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                          : Text(_page == _steps.length - 1 ? 'Gönder' : 'İleri'),
+                  borderRadius: BorderRadius.circular(18),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF6D5DF6).withOpacity(0.38),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
                     ),
+                  ],
+                ),
+                child: ElevatedButton(
+                  onPressed: disabled ? null : _next,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    disabledBackgroundColor: Colors.transparent,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
                   ),
-                ],
+                  child: _submitting
+                      ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                      : Text(primaryLabel, style: applyTextStyle),
+                ),
+              )
+                  : ElevatedButton(
+                onPressed: disabled ? null : _next,
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(vertical: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                ),
+                child: _submitting
+                    ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+                    : Text(
+                  primaryLabel,
+                  style: t.textTheme.titleMedium!.copyWith(
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.2,
+                  ),
+                ),
               ),
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // -------------------- build --------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+
+    final topBg = _heroGradient(isDark);
+
+    return Scaffold(
+      backgroundColor: isDark ? const Color(0xFF0B0D14) : const Color(0xFFF6F7FB),
+      body: Stack(
+        children: [
+          // HERO GRADIENT
+          Container(
+            height: 270,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: topBg,
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+          ),
+
+          // dark vignette
+          if (isDark)
+            Container(
+              height: 270,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [
+                    Colors.black.withOpacity(0.10),
+                    Colors.black.withOpacity(0.35),
+                  ],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
+              ),
+            ),
+
+          SafeArea(
+            child: Column(
+              children: [
+                // TOP BAR
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 10, 14, 10),
+                  child: Row(
+                    children: [
+                      IconButton(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        color: Colors.white,
+                      ),
+                      const SizedBox(width: 4),
+                      const Text(
+                        'Başvuru',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w900,
+                          fontSize: 20,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const Spacer(),
+                      _pillCounter(isDark),
+                    ],
+                  ),
+                ),
+
+                // HERO CONTENT
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 4, 18, 0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _jobTitle(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 34,
+                          height: 1.05,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        _companyName(),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.92),
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Icon(Icons.location_on_rounded,
+                              size: 18, color: Colors.white.withOpacity(0.92)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              _location(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withOpacity(0.92),
+                                fontSize: 16,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 18),
+                      Center(
+                        child: SizedBox(
+                          width: MediaQuery.of(context).size.width * 0.78,
+                          child: _progressBar(isDark),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 14),
+
+                // BODY
+                Expanded(
+                  child: Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0B0D14) : const Color(0xFFF6F7FB),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(26)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(isDark ? 0.45 : 0.12),
+                          blurRadius: 22,
+                          offset: const Offset(0, -6),
+                        )
+                      ],
+                    ),
+                    child: PageView.builder(
+                      controller: _pageCtrl,
+                      itemCount: _steps.length,
+                      physics: const NeverScrollableScrollPhysics(),
+                      onPageChanged: (i) => setState(() => _page = i),
+                      itemBuilder: (context, i) {
+                        final step = _steps[i];
+                        return SingleChildScrollView(
+                          physics: const BouncingScrollPhysics(),
+                          padding: const EdgeInsets.fromLTRB(16, 18, 16, 120),
+                          child: _buildStepWidget(isDark, step),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+
+                // BOTTOM
+                _bottomBar(isDark),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
