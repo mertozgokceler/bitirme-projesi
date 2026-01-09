@@ -10,7 +10,12 @@ const {
 } = require("firebase-functions/v2/firestore");
 const { setGlobalOptions } = require("firebase-functions/v2/options");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore, FieldValue, FieldPath, Timestamp } = require("firebase-admin/firestore");
+const {
+  getFirestore,
+  FieldValue,
+  FieldPath,
+  Timestamp,
+} = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { getAuth } = require("firebase-admin/auth");
 const { onRequest, onCall, HttpsError } = require("firebase-functions/v2/https");
@@ -20,7 +25,8 @@ const functions = require("firebase-functions");
 
 // ✅ CV parse deps
 const pdfParseMod = require("pdf-parse");
-const pdfParse = typeof pdfParseMod === "function" ? pdfParseMod : pdfParseMod.default;
+const pdfParse =
+  typeof pdfParseMod === "function" ? pdfParseMod : pdfParseMod.default;
 const crypto = require("crypto");
 
 // ✅ fetch fallback (Node 18+ has global fetch)
@@ -128,8 +134,6 @@ function normSkill(s) {
     "restful servis": "restapi",
     "rest servisleri": "restapi",
     "rest servisler": "restapi",
-    "rest servisleri": "restapi",
-    "rest servisleri": "restapi",
 
     // multiword normalize
     "machine learning": "machinelearning",
@@ -157,14 +161,23 @@ function normSkill(s) {
 }
 
 // Çok genel skill’leri elemek için stoplist (SADECE SEED / DISCOVERY)
-const STOP_SKILLS = new Set(["html", "css", "sql", "office", "word", "excel", "powerpoint"]);
+const STOP_SKILLS = new Set([
+  "html",
+  "css",
+  "sql",
+  "office",
+  "word",
+  "excel",
+  "powerpoint",
+]);
+
 function pickDiscriminativeSkills(skillsNorm, max = 5) {
   const filtered = (skillsNorm || []).filter((s) => s && !STOP_SKILLS.has(s));
   return filtered.slice(0, max);
 }
 
 /* =========================================================
-   ✅ SKILL SANITIZE (TIRT çöpleri ayıkla)
+   ✅ SKILL SANITIZE (çöpleri ayıkla)
    ========================================================= */
 
 /**
@@ -177,14 +190,14 @@ function isProbablyRealSkillToken(norm) {
   // Çok uzun "cümle" gibi olanları at
   if (norm.length > 34) return false;
 
-  // İzin verdiğimiz karakterler (multiword için boşluk da izinli)
+  // izinli karakterler
   if (!/^[a-z0-9+#/\- ]+$/.test(norm)) return false;
 
-  // Çok fazla kelime -> cümle olma ihtimali
+  // çok kelime = cümle kokusu
   const parts = norm.split(" ").filter(Boolean);
   if (parts.length > 2) return false;
 
-  // Multiword ise her kelime kısa olmalı
+  // multiword ise kelimeler mantıklı uzunlukta
   if (parts.length === 2) {
     if (parts[0].length < 2 || parts[1].length < 2) return false;
     if (parts[0].length > 16 || parts[1].length > 16) return false;
@@ -219,8 +232,6 @@ function getUserSkillsFromCv(afterUser) {
 }
 
 function computeSkillsEffective({ manual, fromCv }) {
-  // CV skill'leri tam ağırlıkla "var" sayılacaksa burada birleşir.
-  // İstersen ileride "cvWeight" gibi bir yapı kurarsın.
   return sanitizeNormalizedSkills([...(manual || []), ...(fromCv || [])]);
 }
 
@@ -261,24 +272,66 @@ function normalizeForHeading(s) {
 }
 
 const SECTION_ALIASES = [
-  { key: "summary", heads: ["ozet", "ozetim", "profil", "hakkimda", "about", "summary", "profile", "professional summary"] },
-
-  { key: "skills", heads: [
-    "beceriler", "yetenekler", "skills", "teknolojiler", "technologies", "technical skills",
-    "teknik yetenekler", "teknik beceriler", "uzmanliklar", "skill set", "skillset"
-  ] },
-
-  { key: "experience", heads: ["deneyim", "is deneyimi", "work experience", "experience", "employment", "kariyer", "staj", "internship"] },
-
+  {
+    key: "summary",
+    heads: [
+      "ozet",
+      "ozetim",
+      "profil",
+      "hakkimda",
+      "about",
+      "summary",
+      "profile",
+      "professional summary",
+    ],
+  },
+  {
+    key: "skills",
+    heads: [
+      "beceriler",
+      "yetenekler",
+      "skills",
+      "teknolojiler",
+      "technologies",
+      "technical skills",
+      "teknik yetenekler",
+      "teknik beceriler",
+      "uzmanliklar",
+      "skill set",
+      "skillset",
+    ],
+  },
+  {
+    key: "experience",
+    heads: [
+      "deneyim",
+      "is deneyimi",
+      "work experience",
+      "experience",
+      "employment",
+      "kariyer",
+      "staj",
+      "internship",
+    ],
+  },
   { key: "education", heads: ["egitim", "education", "akademik", "university", "universite", "lisans", "yuksek lisans"] },
-
   { key: "projects", heads: ["projeler", "projelerim", "projects", "project experience", "personal projects"] },
-
   { key: "certificates", heads: ["sertifikalar", "sertifika", "certifications", "certificates", "courses", "kurslar"] },
-
   { key: "languages", heads: ["diller", "languages", "language"] },
-
-  { key: "links", heads: ["iletisim", "iletisim bilgileri", "contact", "links", "baglantilar", "linkedin", "github", "portfolio", "web sitesi"] },
+  {
+    key: "links",
+    heads: [
+      "iletisim",
+      "iletisim bilgileri",
+      "contact",
+      "links",
+      "baglantilar",
+      "linkedin",
+      "github",
+      "portfolio",
+      "web sitesi",
+    ],
+  },
 ];
 
 function detectSectionKeyFromLine(line) {
@@ -313,7 +366,10 @@ function detectInlineHeading(line) {
 }
 
 function splitCvIntoSections(text) {
-  const lines = safeStr(text).split("\n").map((l) => l.trim()).filter(Boolean);
+  const lines = safeStr(text)
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
 
   const sections = {};
   let current = "other";
@@ -376,7 +432,8 @@ function extractSkillsSeed({ sections, fullText }) {
     const hasBulletList = /[•·]/.test(line);
     const hasPipeList = /\s\|\s/.test(line) && line.length <= 140;
 
-    const mentionsSkillWord = lower.includes("skills") || lower.includes("beceri") || lower.includes("teknoloji");
+    const mentionsSkillWord =
+      lower.includes("skills") || lower.includes("beceri") || lower.includes("teknoloji");
 
     if (mentionsSkillWord && line.length <= 180) candidates.push(line);
 
@@ -404,8 +461,7 @@ function extractSkillsSeed({ sections, fullText }) {
     }
   }
 
-  const normalized = uniq(rawTokens.map(normSkill))
-    .filter(Boolean);
+  const normalized = uniq(rawTokens.map(normSkill)).filter(Boolean);
 
   // seed fazla şişmesin
   return normalized.slice(0, 25);
@@ -428,7 +484,9 @@ function evaluateCvQuality({ text, sections, emailInCv, phoneInCv }) {
   const lines = t.split("\n").map((x) => x.trim()).filter(Boolean);
 
   const lineCount = lines.length;
-  const avgLineLen = lineCount ? Math.round(lines.reduce((a, b) => a + b.length, 0) / lineCount) : 0;
+  const avgLineLen = lineCount
+    ? Math.round(lines.reduce((a, b) => a + b.length, 0) / lineCount)
+    : 0;
 
   const textLen = t.length;
   const garbageRatio = computeGarbageRatio(t);
@@ -481,9 +539,36 @@ function evaluateCvQuality({ text, sections, emailInCv, phoneInCv }) {
 }
 
 /* =========================================================
-   OpenAI JSON
+   OpenAI JSON Prompts
    ========================================================= */
 
+// ✅ 1) CV PARSE (skills + kısa özet + temel alanlar)
+const CV_PARSE_SYSTEM = `
+Sen TechConnect uygulaması için çalışan bir CV ayrıştırma motorusun.
+
+ÇIKTI DİLİ: TÜRKÇE (ZORUNLU)
+- Ürettiğin tüm string alanlar %100 Türkçe olacak.
+- İngilizce cümle/baslik KULLANMA.
+- Teknik terimler (ATS, CV, Backend, API gibi) korunabilir.
+
+KURALLAR:
+- SADECE JSON döndür. Açıklama, markdown, kod bloğu yok.
+- Uydurma bilgi ekleme. CV’de yoksa null veya [] kullan.
+- "skills" alanı: sadece beceri/teknoloji token’ları; cümle yazma.
+
+JSON ŞEMASI:
+{
+  "summary": "string|null",
+  "skills": ["string"],
+  "targetRole": "string|null",
+  "education": ["string"],
+  "experienceHighlights": ["string"],
+  "projects": ["string"],
+  "links": ["string"]
+}
+`.trim();
+
+// ✅ 2) CV ANALYZE (ATS raporu)
 const CV_ANALYZE_SYSTEM = `
 Sen TechConnect uygulaması için çalışan bir CV değerlendirme motorusun.
 
@@ -555,7 +640,6 @@ JSON ŞEMASI:
 }
 `.trim();
 
-
 async function callOpenAiJson({ apiKey, userMessage }) {
   const controller = new AbortController();
   const t = setTimeout(() => controller.abort(), 15000);
@@ -564,13 +648,16 @@ async function callOpenAiJson({ apiKey, userMessage }) {
     const resp = await fetchFn("https://api.openai.com/v1/chat/completions", {
       method: "POST",
       signal: controller.signal,
-      headers: { "Content-Type": "application/json", Authorization: "Bearer " + apiKey },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + apiKey,
+      },
       body: JSON.stringify({
         model: "gpt-4o-mini",
         temperature: 0.2,
         max_tokens: 700,
         messages: [
-          { role: "system", content: CV_SYSTEM },
+          { role: "system", content: CV_PARSE_SYSTEM }, // ✅ FIX: CV_SYSTEM yoktu
           { role: "user", content: userMessage },
         ],
       }),
@@ -604,12 +691,9 @@ function getOpenAiApiKey() {
 function getOpenAiCvAnalyzeKey() {
   const key =
     process.env.OPENAI_API_CV_ANALYZE ||
-    process.env.OPENAI_API_KEY || // fallback (istersen sonra kaldırırsın)
-    "";
-
+    process.env.OPENAI_API_KEY || "";
   return key && String(key).trim() ? String(key).trim() : null;
 }
-
 
 /* =========================================================
    CV AI RATE LIMIT (user başı günlük 3)
@@ -715,24 +799,23 @@ function isWorkModelEligible(user, jobWorkModel) {
 }
 
 /* =========================================================
-   ✅ DISPLAY SCORE + CONFIDENCE (User-only hype, ranking-safe)
+   ✅ DISPLAY SCORE + CONFIDENCE
    ========================================================= */
 
 function getUserSkillSets(user) {
   const manual = sanitizeNormalizedSkills(
-    Array.isArray(user?.skillsManual) ? user.skillsManual : Array.isArray(user?.skills) ? user.skills : []
+    Array.isArray(user?.skillsManual)
+      ? user.skillsManual
+      : Array.isArray(user?.skills)
+        ? user.skills
+        : []
   );
   const fromCv = sanitizeNormalizedSkills(Array.isArray(user?.skillsFromCv) ? user.skillsFromCv : []);
-  const effArr = Array.isArray(user?.skillsEffective)
-    ? user.skillsEffective
-    : null;
+  const effArr = Array.isArray(user?.skillsEffective) ? user.skillsEffective : null;
 
   const effective = sanitizeNormalizedSkills(
-    effArr && effArr.length > 0
-      ? effArr
-      : [...manual, ...fromCv]
-    );
-
+    effArr && effArr.length > 0 ? effArr : [...manual, ...fromCv]
+  );
 
   return {
     manualSet: new Set(manual),
@@ -768,7 +851,6 @@ function computeConfidenceFromEvidence({ matchedReq, manualSet, cvSet, user }) {
     badge = "medium";
   }
 
-  // CV parse kalitesi kötüyse ekstra düşür (opsiyonel ama mantıklı)
   const cvQuality = safeStr(user?.cvParseQuality).trim().toLowerCase();
   if (cvQuality === "bad" && confidenceScore > 0.6) {
     confidenceScore = 0.6;
@@ -790,23 +872,17 @@ function computeConfidenceFromEvidence({ matchedReq, manualSet, cvSet, user }) {
 function toDisplayScore(rawScore) {
   const s = clamp(Math.round(rawScore), 0, 100);
 
-  // Piecewise monotonic calibration (sıralama bozulmaz)
-  // Ama üst banda daha agresif “95 hissi” verir.
-  if (s >= 80) return clamp(Math.round(92 + ((s - 80) / 20) * 7), 92, 99);   // 80..100 -> 92..99
-  if (s >= 60) return clamp(Math.round(75 + ((s - 60) / 20) * 16), 75, 91);  // 60..79 -> 75..91
-  if (s >= 35) return clamp(Math.round(55 + ((s - 35) / 25) * 19), 55, 74);  // 35..59 -> 55..74
-  return clamp(Math.round((s / 35) * 54), 0, 54);                            // 0..34 -> 0..54
+  // monotonic calibration
+  if (s >= 80) return clamp(Math.round(92 + ((s - 80) / 20) * 7), 92, 99);
+  if (s >= 60) return clamp(Math.round(75 + ((s - 60) / 20) * 16), 75, 91);
+  if (s >= 35) return clamp(Math.round(55 + ((s - 35) / 25) * 19), 55, 74);
+  return clamp(Math.round((s / 35) * 54), 0, 54);
 }
 
-/**
- * ✅ Match Engine artık TEK KAYNAK kullanır: skillsEffective
- * (backward compat: skillsEffective yoksa manual/skills'ten üretir)
- */
 function getSkillsEffectiveFromUser(user) {
   const eff = Array.isArray(user?.skillsEffective) ? user.skillsEffective : null;
   if (eff && eff.length) return sanitizeNormalizedSkills(eff);
 
-  // fallback
   const manual = getUserSkillsManual(user);
   const fromCv = getUserSkillsFromCv(user);
   return computeSkillsEffective({ manual, fromCv });
@@ -829,10 +905,15 @@ function computeMatchEngine({ user, job }) {
   const sets = getUserSkillSets(user);
   const userSet = sets.effectiveSet;
 
-  const requiredSkillsNorm = uniq((job.requiredSkillsNormalized || job.requiredSkills || []).map(normSkill)).filter(Boolean);
+  const requiredSkillsNorm = uniq(
+    (job.requiredSkillsNormalized || job.requiredSkills || []).map(normSkill)
+  ).filter(Boolean);
+
   if (requiredSkillsNorm.length === 0) return null;
 
-  const niceSkillsNorm = uniq((job.niceToHaveSkillsNormalized || job.niceToHaveSkills || []).map(normSkill)).filter(Boolean);
+  const niceSkillsNorm = uniq(
+    (job.niceToHaveSkillsNormalized || job.niceToHaveSkills || []).map(normSkill)
+  ).filter(Boolean);
 
   // 4) Required partial match
   const matchedReq = [];
@@ -868,7 +949,10 @@ function computeMatchEngine({ user, job }) {
   let mobileBonus = 0;
   const reqSet = new Set(requiredSkillsNorm);
   const hasMobileJob =
-    reqSet.has("dart") || reqSet.has("flutter") || niceSkillsNorm.includes("flutter") || niceSkillsNorm.includes("dart");
+    reqSet.has("dart") ||
+    reqSet.has("flutter") ||
+    niceSkillsNorm.includes("flutter") ||
+    niceSkillsNorm.includes("dart");
   const hasNative = userSet.has("kotlin") || userSet.has("swift");
   if (hasMobileJob && hasNative) mobileBonus = 5;
   rawScore += mobileBonus;
@@ -924,18 +1008,13 @@ function computeMatchEngine({ user, job }) {
     user,
   });
 
-  // ✅ Apply confidence to internal score (ranking-safe)
   const scoreInternal = clamp(Math.round(rawScore * conf.confidenceScore), 0, 100);
   if (scoreInternal < 35) return null;
 
-  // ✅ Display score (user-only hype)
   const displayScore = toDisplayScore(scoreInternal);
 
   return {
-    // UI-friendly score
     score: displayScore,
-
-    // Debug/ranking info
     scoreInternal,
     scoreRawBeforeConfidence: rawScore,
 
@@ -1131,8 +1210,6 @@ exports.onUserCvUrlChanged = onDocumentWritten("users/{uid}", async (event) => {
         profileStructured: {
           email: emailInCv,
           phone: phoneInCv,
-
-          // seed'i parse aşamasında bile yaz
           skillsSeed,
           skillsNormalizedSeed,
         },
@@ -1218,7 +1295,7 @@ exports.onUserCvUrlChanged = onDocumentWritten("users/{uid}", async (event) => {
     const aiSummary = safeStr(aiJson?.summary).trim();
     const aiSkillsRaw = Array.isArray(aiJson?.skills) ? aiJson.skills : [];
 
-    // ✅ sanitize (cümleleri çöpe at)
+    // ✅ sanitize
     const aiSkillsNormSanitized = sanitizeNormalizedSkills(aiSkillsRaw);
 
     // ✅ final CV skills: AI + seed birleşsin
@@ -1227,15 +1304,13 @@ exports.onUserCvUrlChanged = onDocumentWritten("users/{uid}", async (event) => {
         ? uniq([...aiSkillsNormSanitized, ...skillsNormalizedSeed])
         : skillsNormalizedSeed;
 
-    const finalCvSkillsNorm2 = sanitizeNormalizedSkills(finalCvSkillsNorm);
+    const fromCv = sanitizeNormalizedSkills(finalCvSkillsNorm);
 
     // ✅ NEW: skillsManual / skillsFromCv / skillsEffective ayrımı
-    // Backward compat: skillsManual yoksa eski skills'i manual sayıyoruz
     const userNow = await userRef.get();
     const userNowData = userNow.data() || {};
 
     const manual = getUserSkillsManual(userNowData);
-    const fromCv = finalCvSkillsNorm2;
     const effective = computeSkillsEffective({ manual, fromCv });
 
     await userRef.set(
@@ -1243,19 +1318,15 @@ exports.onUserCvUrlChanged = onDocumentWritten("users/{uid}", async (event) => {
         cvAiStatus: "done",
         cvAiFinishedAt: FieldValue.serverTimestamp(),
 
-        // CV summary UI için
         profileSummary: aiSummary || fallbackSummary,
 
-        // ✅ NEW STORAGE
-        skillsManual: manual,          // kullanıcı seçimi (ya da eski skills)
-        skillsFromCv: fromCv,          // CV/AI kaynaklı
-        skillsEffective: effective,    // match engine tek kaynağı
+        skillsManual: manual,
+        skillsFromCv: fromCv,
+        skillsEffective: effective,
 
         profileStructured: {
           email: emailInCv,
           phone: phoneInCv,
-
-          // AI + seed birlikte
           ...aiJson,
 
           // CV detay ekranı için
@@ -1287,15 +1358,6 @@ exports.onUserCvUrlChanged = onDocumentWritten("users/{uid}", async (event) => {
 
 /* =========================================================
    ✅ CV ANALYSES (User doc'a dokunmadan rapor üret)
-   collection: cvAnalyses/{analysisId}
-   Doc örneği (client yazacak):
-   {
-     uid: "USER_UID",
-     cvUrl: "https://....pdf",
-     targetRole: "Backend Developer" (opsiyonel),
-     createdAt: serverTimestamp(),
-     status: "queued"
-   }
    ========================================================= */
 
 async function callOpenAiJsonReport({ apiKey, userMessage }) {
@@ -1335,7 +1397,6 @@ async function callOpenAiJsonReport({ apiKey, userMessage }) {
   }
 }
 
-// ✅ Ayrı limit: parse limitinle karışmasın
 async function enforceCvAnalyzeDailyLimit(uid) {
   const db = getFirestore();
   const ref = db.collection("cvAnalyzeUsage").doc(uid);
@@ -1427,7 +1488,6 @@ exports.onCvAnalysisCreated = onDocumentCreated("cvAnalyses/{analysisId}", async
     const quality = evaluateCvQuality({ text, sections, emailInCv, phoneInCv });
     const parseQuality = quality.isBad ? "bad" : "good";
 
-    // Kötü parse ise: AI'a gitme, ATS/okunabilirlik fail raporu dön
     if (quality.isBad) {
       await ref.set(
         {
@@ -1449,35 +1509,24 @@ exports.onCvAnalysisCreated = onDocumentCreated("cvAnalyses/{analysisId}", async
             ats: {
               compatScore: 5,
               level: "poor",
-              blockingIssues: [
-                "CV metni sağlıklı okunamadı (PDF text tabanlı değil veya layout bozuk).",
-              ],
+              blockingIssues: ["CV metni sağlıklı okunamadı (PDF text tabanlı değil veya düzen bozuk)."],
               warnings: [],
               quickFixes: [
-                "CV'yi Word/Google Docs'tan 'PDF (text-based)' olarak tekrar export et.",
-                "Scan/fotoğraf PDF kullanma.",
-                "Başlıkları net yap: Summary, Skills, Experience, Education."
+                "CV'yi Word/Google Docs'tan 'PDF (metin tabanlı)' olarak tekrar dışa aktar.",
+                "Tarama/fotoğraf PDF kullanma.",
+                "Başlıkları net yap: Özet, Beceriler, Deneyim, Eğitim."
               ],
             },
             strengths: [],
-            gaps: ["İçerik değerlendirmesi yapılamadı çünkü parse kalitesi düşük."],
+            gaps: ["İçerik değerlendirmesi yapılamadı çünkü ayrıştırma kalitesi düşük."],
             missingSections: [],
-            contentImprovements: {
-              summaryRewrite: null,
-              skillsCleanup: [],
-              experienceFixes: [],
-              projectFixes: [],
-            },
+            contentImprovements: { summaryRewrite: null, skillsCleanup: [], experienceFixes: [], projectFixes: [] },
             bulletFixes: [],
             actionPlan: [
               {
                 title: "Önce formatı düzelt",
                 priority: "high",
-                steps: [
-                  "Text-based PDF yükle",
-                  "Tek sütun ve standart font kullan",
-                  "Başlıkları sade ve ATS uyumlu yaz"
-                ],
+                steps: ["Metin tabanlı PDF yükle", "Tek sütun ve standart font kullan", "Başlıkları sade ve ATS uyumlu yaz"],
               },
             ],
             roleFit: { targetRole, fitScore: 0, why: ["Metin okunamadı"], missingSkills: [], nextSteps: [] },
@@ -1597,7 +1646,7 @@ exports.sendChatNotification = onDocumentCreated("chats/{chatId}/messages/{messa
 });
 
 /* =========================================================
-   2) AI CAREER ADVISOR – Güvenli + Limitli + Hızlı
+   2) AI CAREER ADVISOR
    ========================================================= */
 
 async function requireFirebaseUser(req) {
@@ -1790,21 +1839,19 @@ exports.syncUserSkillIndex = onDocumentWritten("users/{uid}", async (event) => {
   const uid = event.params.uid;
   const db = getFirestore();
 
-  // Skills effective changes?
-const beforeEff = (before ? getSkillsEffectiveFromUser(before) : []).slice().sort();
-const afterEff = getSkillsEffectiveFromUser(after).slice().sort();
+  const beforeEff = (before ? getSkillsEffectiveFromUser(before) : []).slice().sort();
+  const afterEff = getSkillsEffectiveFromUser(after).slice().sort();
 
-// skillsNormalized sync (tek kaynak = skillsEffective)
-const existingNorm = sanitizeNormalizedSkills(after.skillsNormalized || []).slice().sort();
+  // skillsNormalized sync (tek kaynak = skillsEffective)
+  const existingNorm = sanitizeNormalizedSkills(after.skillsNormalized || []).slice().sort();
 
-if (existingNorm.join("|") !== afterEff.join("|")) {
-  await db.collection("users").doc(uid).update({
-    skillsNormalized: afterEff,
-    profileUpdatedAt: FieldValue.serverTimestamp(),
-  });
-  return;
-}
-
+  if (existingNorm.join("|") !== afterEff.join("|")) {
+    await db.collection("users").doc(uid).update({
+      skillsNormalized: afterEff,
+      profileUpdatedAt: FieldValue.serverTimestamp(),
+    });
+    return; // re-trigger ile index güncellemesi devam eder
+  }
 
   if (beforeEff.join("|") === afterEff.join("|")) return;
 
@@ -1851,7 +1898,6 @@ exports.onUserCreatedEnsureDefaults = onDocumentCreated("users/{uid}", async (ev
   if (data.isSearchable === undefined) patch.isSearchable = true;
 
   if (!Array.isArray(data.roles) || data.roles.length === 0) patch.roles = ["user"];
-
   if (!data.workModelPreference) patch.workModelPreference = "any";
 
   if (!data.workModelPrefs || typeof data.workModelPrefs !== "object") {
@@ -1925,15 +1971,26 @@ exports.onJobUpsertComputeMatches = onDocumentWritten("jobs/{jobId}", async (eve
     return;
   }
 
-  // SEED = REQUIRED
-  const seedBase = requiredNorm.length > 0 ? requiredNorm : uniq((after.skillsNormalized || after.skills || []).map(normSkill)).filter(Boolean);
+  // SEED = REQUIRED (fallback: skills)
+  const seedBase =
+    requiredNorm.length > 0
+      ? requiredNorm
+      : uniq((after.skillsNormalized || after.skills || []).map(normSkill)).filter(Boolean);
 
-  // ✅ dynamic seed count
   const seedCount = requiredNorm.length <= 4 ? 3 : requiredNorm.length <= 8 ? 5 : 6;
-  const seeds = pickDiscriminativeSkills(seedBase, seedCount);
+
+  let seeds = pickDiscriminativeSkills(seedBase, seedCount);
+
+  // ✅ FIX: stop-skill yüzünden seed boş kalırsa fallback yap
+  if (seeds.length === 0) {
+    seeds = (seedBase || []).slice(0, seedCount);
+  }
+
   if (seeds.length === 0) return;
 
   const candidateMap = new Map();
+
+  // (isteğe bağlı optimizasyon: parallel okuma)
   for (const sk of seeds) {
     const snap = await db.collection("userSkillIndex").doc(sk).collection("users").limit(500).get();
     snap.forEach((doc) => {
@@ -1975,6 +2032,14 @@ exports.onJobUpsertComputeMatches = onDocumentWritten("jobs/{jobId}", async (eve
       const requiredNorm2 = uniq((after.requiredSkillsNormalized || after.requiredSkills || []).map(normSkill)).filter(Boolean);
 
       const reasons = [];
+      const confText =
+        result.confidenceBadge === "high"
+          ? "Güven: Yüksek (profil/manuel kanıt güçlü)."
+          : result.confidenceBadge === "medium"
+            ? "Güven: Orta (karışık kaynak)."
+            : "Güven: Düşük (CV bazlı, doğrulanmamış).";
+      reasons.push(confText);
+
       reasons.push(`Required uyum: %${Math.round(result.reqRatio * 100)} (${result.matchedSkills.length}/${requiredNorm2.length}).`);
 
       if (result.matchedSkills.length > 0) reasons.push(`Required sende: ${result.matchedSkills.slice(0, 3).join(", ")}.`);
@@ -1984,15 +2049,6 @@ exports.onJobUpsertComputeMatches = onDocumentWritten("jobs/{jobId}", async (eve
       if (result.bioBonus > 0) reasons.push("Bio içeriğin required becerilerle örtüşüyor.");
       if (result.geoBonus > 0 && result.distanceKm != null) reasons.push(`Yakınlık avantajı: ~${Math.round(result.distanceKm)} km.`);
       if (after.workModel) reasons.push(`Çalışma modeli: ${after.workModel}.`);
-
-      // ✅ confidence note (user-side etiketi)
-      const confText =
-        result.confidenceBadge === "high"
-          ? "Güven: Yüksek (profil/manuel kanıt güçlü)."
-          : result.confidenceBadge === "medium"
-            ? "Güven: Orta (karışık kaynak)."
-            : "Güven: Düşük (CV bazlı, doğrulanmamış).";
-      reasons.unshift(confText);
 
       batch.set(
         matchRef,
@@ -2124,6 +2180,14 @@ exports.onUserProfileRecomputeMatches = onDocumentWritten("users/{uid}", async (
       const requiredNorm = uniq((job.requiredSkillsNormalized || job.requiredSkills || []).map(normSkill)).filter(Boolean);
 
       const reasons = [];
+      const confText =
+        result.confidenceBadge === "high"
+          ? "Güven: Yüksek (profil/manuel kanıt güçlü)."
+          : result.confidenceBadge === "medium"
+            ? "Güven: Orta (karışık kaynak)."
+            : "Güven: Düşük (CV bazlı, doğrulanmamış).";
+      reasons.push(confText);
+
       reasons.push(`Required uyum: %${Math.round(result.reqRatio * 100)} (${result.matchedSkills.length}/${requiredNorm.length}).`);
       if (result.matchedSkills.length > 0) reasons.push(`Required sende: ${result.matchedSkills.slice(0, 3).join(", ")}.`);
       if (result.missingSkills.length > 0) reasons.push(`Eksik required: ${result.missingSkills.slice(0, 3).join(", ")}.`);
@@ -2133,23 +2197,12 @@ exports.onUserProfileRecomputeMatches = onDocumentWritten("users/{uid}", async (
       if (result.geoBonus > 0 && result.distanceKm != null) reasons.push(`Yakınlık avantajı: ~${Math.round(result.distanceKm)} km.`);
       if (job.workModel) reasons.push(`Çalışma modeli: ${job.workModel}.`);
 
-      const confText =
-        result.confidenceBadge === "high"
-          ? "Güven: Yüksek (profil/manuel kanıt güçlü)."
-          : result.confidenceBadge === "medium"
-            ? "Güven: Orta (karışık kaynak)."
-            : "Güven: Düşük (CV bazlı, doğrulanmamış).";
-      reasons.unshift(confText);
-
       batch.set(
         ref,
         {
           jobId,
-
-          // ✅ USER DISPLAY
           score: result.score,
 
-          // ✅ INTERNAL
           scoreInternal: result.scoreInternal,
           scoreRawBeforeConfidence: result.scoreRawBeforeConfidence,
 
@@ -2218,35 +2271,21 @@ exports.onJobDeletedCleanupMatches = onDocumentDeleted("jobs/{jobId}", async (ev
 
 /* =========================================================
    ✅ DEMO PREMIUM (Aylık / Yıllık)
-   Callable: completeDemoPaymentAndActivatePremium
-   planId: premium_monthly | premium_yearly
    ========================================================= */
 
 exports.completeDemoPaymentAndActivatePremium = onCall(async (request) => {
   const uid = request.auth?.uid;
-  if (!uid) {
-    throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
-  }
+  if (!uid) throw new HttpsError("unauthenticated", "Giriş yapılmamış.");
 
   const { planId, clientTxId } = request.data || {};
-  if (!planId || !clientTxId) {
-    throw new HttpsError("invalid-argument", "Eksik parametre: planId/clientTxId");
-  }
+  if (!planId || !clientTxId) throw new HttpsError("invalid-argument", "Eksik parametre: planId/clientTxId");
 
-  const PLAN_DAYS = {
-    premium_monthly: 30,
-    premium_yearly: 365,
-  };
-
+  const PLAN_DAYS = { premium_monthly: 30, premium_yearly: 365 };
   const daysToAdd = PLAN_DAYS[planId];
-  if (!daysToAdd) {
-    throw new HttpsError("invalid-argument", "Geçersiz planId.");
-  }
+  if (!daysToAdd) throw new HttpsError("invalid-argument", "Geçersiz planId.");
 
   const db = getFirestore();
   const userRef = db.collection("users").doc(uid);
-
-  // ✅ idempotency: aynı clientTxId tekrar gelirse ikinci kez süre eklemesin
   const txRef = db.collection("premiumEvents").doc(`${uid}_${clientTxId}`);
 
   let computedPremiumUntil = null;
@@ -2254,9 +2293,7 @@ exports.completeDemoPaymentAndActivatePremium = onCall(async (request) => {
   await db.runTransaction(async (tx) => {
     const [txSnap, userSnap] = await Promise.all([tx.get(txRef), tx.get(userRef)]);
 
-    // aynı tx tekrar geldiyse -> hiç dokunma (idempotent)
     if (txSnap.exists) {
-      // mümkünse eski premiumUntil'ı response için al
       if (userSnap.exists) {
         const u = userSnap.data() || {};
         if (u.premiumUntil && typeof u.premiumUntil.toDate === "function") {
@@ -2267,9 +2304,8 @@ exports.completeDemoPaymentAndActivatePremium = onCall(async (request) => {
     }
 
     const now = Timestamp.now();
-
-    // aktif premium varsa üstüne ekle, yoksa now'dan başlat
     let base = now;
+
     if (userSnap.exists) {
       const u = userSnap.data() || {};
       const until = u.premiumUntil;
@@ -2284,13 +2320,12 @@ exports.completeDemoPaymentAndActivatePremium = onCall(async (request) => {
 
     computedPremiumUntil = premiumUntil;
 
-    // ✅ alanlar yoksa otomatik oluşur (merge:true)
     tx.set(
       userRef,
       {
         isPremium: true,
         premiumUntil,
-        premiumPlan: planId,           // premium_monthly | premium_yearly
+        premiumPlan: planId,
         premiumSource: "demo",
         premiumStartedAt: FieldValue.serverTimestamp(),
         premiumUpdatedAt: FieldValue.serverTimestamp(),
@@ -2298,7 +2333,6 @@ exports.completeDemoPaymentAndActivatePremium = onCall(async (request) => {
       { merge: true }
     );
 
-    // log
     tx.set(
       txRef,
       {
@@ -2312,42 +2346,28 @@ exports.completeDemoPaymentAndActivatePremium = onCall(async (request) => {
     );
   });
 
-  return {
-    isPremium: true,
-    planId,
-    premiumUntil: computedPremiumUntil, // Timestamp (client isterse gösterir)
-  };
+  return { isPremium: true, planId, premiumUntil: computedPremiumUntil };
 });
 
-// ✅ STORY HELPERS
-function storySummaryFromItem({ ownerUid, userName, userPhotoUrl, lastStoryAt, lastThumbUrl, expiresAt, activeCount }) {
-  return {
-    ownerUid,
-    userName: userName || "",
-    userPhotoUrl: userPhotoUrl || "",
-    lastStoryAt: lastStoryAt || FieldValue.serverTimestamp(),
-    lastThumbUrl: lastThumbUrl || "",
-    expiresAt: expiresAt || FieldValue.serverTimestamp(),
-    activeCount: activeCount ?? 0,
-    updatedAt: FieldValue.serverTimestamp(),
-  };
-}
+/* =========================================================
+   ✅ STORY FANOUT (FIXED: count şişirme yok)
+   ========================================================= */
 
-
-// recompute owner summary by scanning remaining active items
 async function recomputeOwnerStorySummary(db, ownerUid) {
   const itemsRef = db.collection("stories").doc(ownerUid).collection("items");
 
-  // sadece aktifleri çek (expiresAt > now)
   const now = Timestamp.now();
-  const snap = await itemsRef.where("expiresAt", ">", now).orderBy("expiresAt", "desc").limit(50).get();
+  const snap = await itemsRef
+    .where("expiresAt", ">", now)
+    .orderBy("expiresAt", "desc")
+    .limit(50)
+    .get();
 
-  if (snap.empty) {
-    return { exists: false };
-  }
+  if (snap.empty) return { exists: false };
 
-  const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  // lastStoryAt: createdAt en yeni item (createdAt yoksa expiresAt'a bakar)
+  const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
+  const activeCount = docs.length;
+
   docs.sort((a, b) => {
     const ac = a.createdAt?.toMillis?.() || 0;
     const bc = b.createdAt?.toMillis?.() || 0;
@@ -2355,228 +2375,97 @@ async function recomputeOwnerStorySummary(db, ownerUid) {
   });
 
   const latest = docs[0];
-  const maxExpire = docs.reduce((m, x) => {
-    const t = x.expiresAt?.toMillis?.() || 0;
-    return Math.max(m, t);
-  }, 0);
+  const maxExpireMillis = docs.reduce((m, x) => Math.max(m, x.expiresAt?.toMillis?.() || 0), 0);
 
   return {
     exists: true,
     lastStoryAt: latest.createdAt || FieldValue.serverTimestamp(),
-    lastThumbUrl: latest.thumbUrl || latest.mediaUrl || "",
-    expiresAt: Timestamp.fromMillis(maxExpire),
-    activeCount: docs.length,
+    lastThumbUrl: String(latest.thumbUrl || latest.url || latest.mediaUrl || "").trim(),
+    expiresAt: Timestamp.fromMillis(maxExpireMillis),
+    activeCount,
   };
 }
 
-// ===== STORY FANOUT (FIXED) =====
+// owner story item write -> recompute owner summary -> fanout feed
+exports.onStoryItemWriteFanout = onDocumentWritten("stories/{ownerUid}/items/{storyId}", async (event) => {
+  const db = getFirestore();
+  const ownerUid = event.params.ownerUid;
 
-// owner story item -> viewer feed summary
-exports.onStoryItemWriteFanout = onDocumentWritten(
-  "stories/{ownerUid}/items/{storyId}",
-  async (event) => {
-    const db = getFirestore();
-    const ownerUid = event.params.ownerUid;
+  // delete burada değil
+  if (!event.data?.after?.exists) return;
 
-    // delete burada değil
-    if (!event.data?.after?.exists) return;
+  const now = Timestamp.now();
 
-    const item = event.data.after.data() || {};
-    const now = Timestamp.now();
+  // owner user meta
+  const userSnap = await db.collection("users").doc(ownerUid).get();
+  const u = userSnap.exists ? userSnap.data() || {} : {};
+  const userName = String(u.name || u.companyName || u.userName || "").trim();
+  const userPhotoUrl = String(u.photoUrl || u.photo || u.profilePhotoUrl || u.userPhotoUrl || "").trim();
 
-    // expiresAt zorunlu olsun
-    const itemExpiresAt =
-      item.expiresAt && typeof item.expiresAt.toMillis === "function"
-        ? item.expiresAt
-        : Timestamp.fromMillis(now.toMillis() + 24 * 60 * 60 * 1000);
+  // ✅ recompute exact
+  const sum = await recomputeOwnerStorySummary(db, ownerUid);
+  if (!sum.exists) return;
 
-    // item url/thumbnail
-    const lastThumbUrl = String(item.thumbUrl || item.url || item.mediaUrl || "").trim();
-
-    // owner user meta
-    const userSnap = await db.collection("users").doc(ownerUid).get();
-    const u = userSnap.exists ? userSnap.data() || {} : {};
-    const userName = String(u.name || u.companyName || u.userName || "").trim();
-    const userPhotoUrl = String(u.photoUrl || u.photo || u.profilePhotoUrl || u.userPhotoUrl || "").trim();
-
-    // ===== 1) OWNER SUMMARY UPDATE (stories/{ownerUid}) =====
-    const ownerRef = db.collection("stories").doc(ownerUid);
-
-    // eski expiresAt ile max al
-    const ownerPrev = await ownerRef.get();
-    let prevExpires = null;
-    if (ownerPrev.exists) {
-      const d = ownerPrev.data() || {};
-      const ex = d.expiresAt;
-      if (ex && typeof ex.toMillis === "function") prevExpires = ex;
-    }
-    const finalExpiresAt =
-      prevExpires && prevExpires.toMillis() > itemExpiresAt.toMillis() ? prevExpires : itemExpiresAt;
-
-    // owner summary: increment’i burada DOĞRU kullan
-    await ownerRef.set(
-      {
-        ownerUid,
-        userName,
-        userPhotoUrl,
-        lastStoryAt: item.createdAt || FieldValue.serverTimestamp(),
-        lastThumbUrl,
-        expiresAt: finalExpiresAt,
-        activeCount: FieldValue.increment(1),
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    // ===== 2) VIEWER LIST (connections/{ownerUid}/list/{viewerUid}) =====
-    // Eğer sende status yoksa where satırını kaldır.
-    const conSnap = await db
-      .collection("connections")
-      .doc(ownerUid)
-      .collection("list")
-      .get();
-
-    if (conSnap.empty) return;
-
-    // ===== 3) FANOUT TO storyFeed/{viewerUid}/items/{ownerUid} =====
-    const payload = {
+  const ownerRef = db.collection("stories").doc(ownerUid);
+  await ownerRef.set(
+    {
       ownerUid,
       userName,
       userPhotoUrl,
-      lastStoryAt: item.createdAt || FieldValue.serverTimestamp(),
-      lastThumbUrl,
-      expiresAt: finalExpiresAt,
-      // feed tarafında increment değil, yaklaşık değer yeter:
-      // istersen recompute ile exact yaparsın.
-      activeCount: 1,
+      lastStoryAt: sum.lastStoryAt,
+      lastThumbUrl: sum.lastThumbUrl,
+      expiresAt: sum.expiresAt,
+      activeCount: sum.activeCount,
       updatedAt: FieldValue.serverTimestamp(),
-    };
+    },
+    { merge: true }
+  );
 
-    let batch = db.batch();
-    let ops = 0;
+  // connections list
+  const conSnap = await db.collection("connections").doc(ownerUid).collection("list").get();
+  if (conSnap.empty) return;
 
-    for (const c of conSnap.docs) {
-      const viewerUid = c.id;
+  // payload
+  const payload = {
+    ownerUid,
+    userName,
+    userPhotoUrl,
+    lastStoryAt: sum.lastStoryAt,
+    lastThumbUrl: sum.lastThumbUrl,
+    expiresAt: sum.expiresAt,
+    activeCount: sum.activeCount,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
 
-      const ref = db
-        .collection("storyFeed")
-        .doc(viewerUid)
-        .collection("items")
-        .doc(ownerUid);
+  let batch = db.batch();
+  let ops = 0;
 
-      batch.set(ref, payload, { merge: true });
-      ops++;
-
-      if (ops >= 450) {
-        await batch.commit();
-        batch = db.batch();
-        ops = 0;
-      }
+  for (const c of conSnap.docs) {
+    const viewerUid = c.id;
+    const ref = db.collection("storyFeed").doc(viewerUid).collection("items").doc(ownerUid);
+    batch.set(ref, payload, { merge: true });
+    ops++;
+    if (ops >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      ops = 0;
     }
-    if (ops > 0) await batch.commit();
   }
-);
+  if (ops > 0) await batch.commit();
+});
 
 // item delete -> recompute owner summary, update or delete feed
-exports.onStoryItemDeleteFanout = onDocumentDeleted(
-  "stories/{ownerUid}/items/{storyId}",
-  async (event) => {
-    const db = getFirestore();
-    const ownerUid = event.params.ownerUid;
-    const now = Timestamp.now();
+exports.onStoryItemDeleteFanout = onDocumentDeleted("stories/{ownerUid}/items/{storyId}", async (event) => {
+  const db = getFirestore();
+  const ownerUid = event.params.ownerUid;
 
-    const itemsRef = db.collection("stories").doc(ownerUid).collection("items");
+  const conSnap = await db.collection("connections").doc(ownerUid).collection("list").get();
+  const ownerRef = db.collection("stories").doc(ownerUid);
 
-    // aktif item kaldı mı?
-    const snap = await itemsRef
-      .where("expiresAt", ">", now)
-      .orderBy("expiresAt", "desc")
-      .limit(50)
-      .get();
+  const sum = await recomputeOwnerStorySummary(db, ownerUid);
 
-    // viewer list
-    const conSnap = await db
-      .collection("connections")
-      .doc(ownerUid)
-      .collection("list")
-      .get();
-
-
-    const ownerRef = db.collection("stories").doc(ownerUid);
-
-    if (snap.empty) {
-      // owner summary sil
-      await ownerRef.delete().catch(() => {});
-
-      // feed temizle
-      let batch = db.batch();
-      let ops = 0;
-
-      for (const c of conSnap.docs) {
-        const viewerUid = c.id;
-        const ref = db.collection("storyFeed").doc(viewerUid).collection("items").doc(ownerUid);
-        batch.delete(ref);
-        ops++;
-
-        if (ops >= 450) {
-          await batch.commit();
-          batch = db.batch();
-          ops = 0;
-        }
-      }
-      if (ops > 0) await batch.commit();
-      return;
-    }
-
-    // recompute: lastStoryAt + max expires + thumb + count
-    const docs = snap.docs.map((d) => ({ id: d.id, ...(d.data() || {}) }));
-    const activeCount = docs.length;
-
-    // lastStoryAt: createdAt en yeni
-    docs.sort((a, b) => {
-      const ac = a.createdAt?.toMillis?.() || 0;
-      const bc = b.createdAt?.toMillis?.() || 0;
-      return bc - ac;
-    });
-
-    const latest = docs[0];
-    const maxExpireMillis = docs.reduce((m, x) => Math.max(m, x.expiresAt?.toMillis?.() || 0), 0);
-
-    const finalExpiresAt = Timestamp.fromMillis(maxExpireMillis);
-    const lastThumbUrl = String(latest.thumbUrl || latest.url || latest.mediaUrl || "").trim();
-
-    // owner meta
-    const userSnap = await db.collection("users").doc(ownerUid).get();
-    const u = userSnap.exists ? userSnap.data() || {} : {};
-    const userName = String(u.name || u.companyName || u.userName || "").trim();
-    const userPhotoUrl = String(u.photoUrl || u.photo || u.profilePhotoUrl || u.userPhotoUrl || "").trim();
-
-    // owner summary update (exact activeCount yaz)
-    await ownerRef.set(
-      {
-        ownerUid,
-        userName,
-        userPhotoUrl,
-        lastStoryAt: latest.createdAt || FieldValue.serverTimestamp(),
-        lastThumbUrl,
-        expiresAt: finalExpiresAt,
-        activeCount,
-        updatedAt: FieldValue.serverTimestamp(),
-      },
-      { merge: true }
-    );
-
-    // feed update
-    const payload = {
-      ownerUid,
-      userName,
-      userPhotoUrl,
-      lastStoryAt: latest.createdAt || FieldValue.serverTimestamp(),
-      lastThumbUrl,
-      expiresAt: finalExpiresAt,
-      activeCount,
-      updatedAt: FieldValue.serverTimestamp(),
-    };
+  if (!sum.exists) {
+    await ownerRef.delete().catch(() => {});
 
     let batch = db.batch();
     let ops = 0;
@@ -2584,9 +2473,8 @@ exports.onStoryItemDeleteFanout = onDocumentDeleted(
     for (const c of conSnap.docs) {
       const viewerUid = c.id;
       const ref = db.collection("storyFeed").doc(viewerUid).collection("items").doc(ownerUid);
-      batch.set(ref, payload, { merge: true });
+      batch.delete(ref);
       ops++;
-
       if (ops >= 450) {
         await batch.commit();
         batch = db.batch();
@@ -2594,5 +2482,53 @@ exports.onStoryItemDeleteFanout = onDocumentDeleted(
       }
     }
     if (ops > 0) await batch.commit();
+    return;
   }
-);
+
+  // owner meta
+  const userSnap = await db.collection("users").doc(ownerUid).get();
+  const u = userSnap.exists ? userSnap.data() || {} : {};
+  const userName = String(u.name || u.companyName || u.userName || "").trim();
+  const userPhotoUrl = String(u.photoUrl || u.photo || u.profilePhotoUrl || u.userPhotoUrl || "").trim();
+
+  await ownerRef.set(
+    {
+      ownerUid,
+      userName,
+      userPhotoUrl,
+      lastStoryAt: sum.lastStoryAt,
+      lastThumbUrl: sum.lastThumbUrl,
+      expiresAt: sum.expiresAt,
+      activeCount: sum.activeCount,
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  const payload = {
+    ownerUid,
+    userName,
+    userPhotoUrl,
+    lastStoryAt: sum.lastStoryAt,
+    lastThumbUrl: sum.lastThumbUrl,
+    expiresAt: sum.expiresAt,
+    activeCount: sum.activeCount,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  let batch = db.batch();
+  let ops = 0;
+
+  for (const c of conSnap.docs) {
+    const viewerUid = c.id;
+    const ref = db.collection("storyFeed").doc(viewerUid).collection("items").doc(ownerUid);
+    batch.set(ref, payload, { merge: true });
+    ops++;
+    if (ops >= 450) {
+      await batch.commit();
+      batch = db.batch();
+      ops = 0;
+    }
+  }
+  if (ops > 0) await batch.commit();
+});

@@ -1,13 +1,20 @@
+// lib/screens/chat_list_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import '../services/call_service.dart';
 import 'chat_detail_screen.dart';
 import 'new_chat_search_screen.dart';
-import '../services/call_service.dart';
 
 class ChatListScreen extends StatefulWidget {
-  const ChatListScreen({super.key});
+  final CallService callService;
+
+  const ChatListScreen({
+    super.key,
+    required this.callService,
+  });
 
   @override
   State<ChatListScreen> createState() => _ChatListScreenState();
@@ -16,7 +23,53 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> {
   final _firestore = FirebaseFirestore.instance;
   final _auth = FirebaseAuth.instance;
-  final CallService _callService = CallService();
+
+  bool _showArchived = false; // ✅ Sohbetler / Arşiv toggle
+
+  // ====== WhatsApp-style: hard delete all messages in chat for both ======
+  Future<void> _deleteChatForEveryone(String chatId) async {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) return;
+
+    final chatRef = _firestore.collection('chats').doc(chatId);
+
+    try {
+      // 1) delete messages in pages (batch of <= 450 to be safe)
+      while (true) {
+        final qs = await chatRef
+            .collection('messages')
+            .orderBy('timestamp', descending: true)
+            .limit(450)
+            .get();
+
+        if (qs.docs.isEmpty) break;
+
+        final batch = _firestore.batch();
+        for (final d in qs.docs) {
+          batch.delete(d.reference);
+        }
+        await batch.commit();
+      }
+
+      // 2) reset chat doc so it disappears from both users' lists
+      await chatRef.set({
+        'hasMessages': false,
+        'lastMessage': '',
+        'lastMessageType': null,
+        'lastMessageSenderId': null,
+        'lastMessageTimestamp': null,
+        'archivedBy': <String>[],
+        'deletedAllAt': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+    } catch (e) {
+      debugPrint('Chat delete for everyone error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Sohbet silinemedi.')),
+        );
+      }
+    }
+  }
 
   Future<void> _toggleArchive(String chatId, bool shouldArchive) async {
     final uid = _auth.currentUser?.uid;
@@ -28,29 +81,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
             ? FieldValue.arrayUnion([uid])
             : FieldValue.arrayRemove([uid]),
       });
+
+      // ✅ UX: arşivden çıkarınca direkt sohbetlere dön
+      if (!shouldArchive && mounted && _showArchived) {
+        setState(() => _showArchived = false);
+      }
     } catch (e) {
-      debugPrint('Arşiv güncelleme hatası: $e');
+      debugPrint('Archive update error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Arşivleme işlemi başarısız oldu.')),
-        );
-      }
-    }
-  }
-
-  Future<void> _clearChatForCurrentUser(String chatId) async {
-    final uid = _auth.currentUser?.uid;
-    if (uid == null) return;
-
-    try {
-      await _firestore.collection('chats').doc(chatId).update({
-        'clearedAt.$uid': FieldValue.serverTimestamp(),
-      });
-    } catch (e) {
-      debugPrint('Sohbet temizleme hatası: $e');
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Sohbet silinemedi.')),
         );
       }
     }
@@ -64,104 +104,395 @@ class _ChatListScreenState extends State<ChatListScreen> {
     if (uid == null) return;
 
     final t = Theme.of(context);
-    final c = ChatColors.of(t);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
 
     final List<dynamic> archivedBy = chatData['archivedBy'] ?? [];
     final bool isArchivedForUser = archivedBy.contains(uid);
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: c.sheetBg,
-      shape: RoundedRectangleBorder(
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-        side: BorderSide(color: c.cardBorder),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (context) {
         return SafeArea(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ListTile(
-                leading: Icon(
-                  isArchivedForUser
-                      ? Icons.unarchive_rounded
-                      : Icons.archive_rounded,
-                  color: c.icon,
+          child: Container(
+            margin: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            decoration: BoxDecoration(
+              color: cs.surface.withOpacity(isDark ? 0.75 : 0.96),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(color: cs.outline.withOpacity(0.70)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(isDark ? 0.22 : 0.10),
+                  blurRadius: 18,
+                  offset: const Offset(0, -6),
                 ),
-                title: Text(
-                  isArchivedForUser ? 'Arşivden çıkar' : 'Arşive taşı',
-                  style: TextStyle(color: c.textPrimary),
+              ],
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 8),
+                Container(
+                  width: 44,
+                  height: 5,
+                  decoration: BoxDecoration(
+                    color: cs.onSurface.withOpacity(0.20),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
                 ),
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  await _toggleArchive(chatId, !isArchivedForUser);
-                },
-              ),
-              Divider(height: 0, color: c.divider),
-              ListTile(
-                leading: Icon(Icons.delete_forever_rounded, color: c.danger),
-                title: Text(
-                  'Sohbeti sil',
-                  style: TextStyle(color: c.danger, fontWeight: FontWeight.w600),
+                const SizedBox(height: 8),
+                ListTile(
+                  leading: Icon(
+                    isArchivedForUser
+                        ? Icons.unarchive_rounded
+                        : Icons.archive_rounded,
+                    color: cs.onSurface,
+                  ),
+                  title: Text(
+                    isArchivedForUser ? 'Arşivden çıkar' : 'Arşive taşı',
+                    style: TextStyle(color: cs.onSurface),
+                  ),
+                  onTap: () async {
+                    Navigator.of(context).pop();
+                    await _toggleArchive(chatId, !isArchivedForUser);
+                  },
                 ),
-                onTap: () async {
-                  Navigator.of(context).pop();
-                  final confirm = await showDialog<bool>(
-                    context: context,
-                    builder: (ctx) {
-                      final tt = Theme.of(ctx);
-                      final cc = ChatColors.of(tt);
+                Divider(height: 0, color: cs.outline.withOpacity(0.40)),
+                ListTile(
+                  leading: const Icon(Icons.delete_forever_rounded,
+                      color: Colors.redAccent),
+                  title: const Text(
+                    'Sohbeti Sil',
+                    style: TextStyle(
+                        color: Colors.redAccent, fontWeight: FontWeight.w900),
+                  ),
+                  onTap: () async {
+                    Navigator.of(context).pop();
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (ctx) {
+                        final tt = Theme.of(ctx);
+                        final ccs = tt.colorScheme;
+                        final dark = tt.brightness == Brightness.dark;
 
-                      return AlertDialog(
-                        backgroundColor: cc.dialogBg,
-                        surfaceTintColor: Colors.transparent,
-                        title: Text(
-                          'Sohbet silinsin mi?',
-                          style: TextStyle(color: cc.textPrimary),
-                        ),
-                        content: Text(
-                          'Bu işlem sadece senin hesabın için geçerli olacak. '
-                              'Sohbet, diğer kullanıcıdan silinmeyecek. '
-                              'Yeni mesaj gelirse sohbet tekrar görünür.',
-                          style: TextStyle(color: cc.textSecondary),
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(false),
-                            style: ButtonStyle(
-                              foregroundColor:
-                              WidgetStatePropertyAll(cc.textSecondary),
-                              overlayColor: WidgetStatePropertyAll(
-                                cc.brand.withOpacity(0.12),
+                        return AlertDialog(
+                          backgroundColor:
+                          ccs.surface.withOpacity(dark ? 0.90 : 0.98),
+                          surfaceTintColor: Colors.transparent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(18),
+                            side: BorderSide(color: ccs.outline.withOpacity(0.55)),
+                          ),
+                          title: Text(
+                            'Sohbet tamamen silinsin mi?',
+                            style: TextStyle(
+                              color: ccs.onSurface,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          content: Text(
+                            'Bu işlem mesajları iki taraftan da kaldırır ve sohbet listeden düşer.',
+                            style: TextStyle(
+                              color: ccs.onSurface.withOpacity(0.75),
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(false),
+                              child: Text(
+                                'Vazgeç',
+                                style: TextStyle(
+                                  color: ccs.onSurface.withOpacity(0.75),
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
-                            child: const Text('Vazgeç'),
-                          ),
-                          TextButton(
-                            onPressed: () => Navigator.of(ctx).pop(true),
-                            style: ButtonStyle(
-                              foregroundColor: WidgetStatePropertyAll(cc.danger),
-                              overlayColor: WidgetStatePropertyAll(
-                                cc.danger.withOpacity(0.12),
+                            TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(true),
+                              child: const Text(
+                                'Sil',
+                                style: TextStyle(
+                                  color: Colors.redAccent,
+                                  fontWeight: FontWeight.w900,
+                                ),
                               ),
                             ),
-                            child: const Text('Sil'),
-                          ),
-                        ],
-                      );
-                    },
-                  );
+                          ],
+                        );
+                      },
+                    );
 
-                  if (confirm == true) {
-                    await _clearChatForCurrentUser(chatId);
-                  }
-                },
-              ),
-              const SizedBox(height: 8),
-            ],
+                    if (confirm == true) {
+                      await _deleteChatForEveryone(chatId);
+                    }
+                  },
+                ),
+                const SizedBox(height: 10),
+              ],
+            ),
           ),
         );
       },
+    );
+  }
+
+  // ====== UI ======
+  LinearGradient _bgGradient(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (isDark) {
+      return const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xFF0B1220), Color(0xFF0A1B2E), Color(0xFF081829)],
+      );
+    }
+    return const LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [Color(0xFFF6FAFF), Color(0xFFEFF6FF), Color(0xFFF9FBFF)],
+    );
+  }
+
+  PreferredSizeWidget _buildTopBar() {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+
+    return AppBar(
+      title: Text(_showArchived ? 'Arşiv' : 'Sohbetler'),
+      centerTitle: false,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
+      iconTheme: IconThemeData(color: cs.onSurface),
+      titleTextStyle: TextStyle(
+        color: cs.onSurface,
+        fontSize: 20,
+        fontWeight: FontWeight.w900,
+      ),
+    );
+  }
+
+  Widget _glassCard({required Widget child}) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: cs.surface.withOpacity(isDark ? 0.70 : 0.94),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: cs.outline.withOpacity(0.70)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.18 : 0.06),
+            blurRadius: 18,
+            offset: const Offset(0, 12),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+
+  Widget _segmentedHeader() {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
+
+    return _glassCard(
+      child: Container(
+        padding: const EdgeInsets.all(6),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _showArchived = false),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: !_showArchived
+                        ? cs.primary.withOpacity(isDark ? 0.35 : 0.16)
+                        : Colors.transparent,
+                    border: Border.all(
+                      color: !_showArchived
+                          ? cs.primary.withOpacity(isDark ? 0.55 : 0.35)
+                          : cs.outline.withOpacity(0.35),
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'Sohbetler',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: GestureDetector(
+                onTap: () => setState(() => _showArchived = true),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(vertical: 10),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(14),
+                    color: _showArchived
+                        ? cs.primary.withOpacity(isDark ? 0.35 : 0.16)
+                        : Colors.transparent,
+                    border: Border.all(
+                      color: _showArchived
+                          ? cs.primary.withOpacity(isDark ? 0.55 : 0.35)
+                          : cs.outline.withOpacity(0.35),
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'Arşiv',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: cs.onSurface,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatTile({
+    required String chatId,
+    required Map<String, dynamic> chatData,
+    required String currentUserUid,
+    required String otherUserUid,
+    required Map<String, dynamic> otherUserData,
+    required String snippet,
+  }) {
+    final t = Theme.of(context);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
+
+    final otherUserName =
+    (otherUserData['name'] ?? 'Bilinmeyen Kullanıcı').toString();
+    final otherUserPhotoUrl = otherUserData['photoUrl'] as String?;
+
+    final List<dynamic> archivedBy = chatData['archivedBy'] ?? [];
+    final bool isArchivedForUser = archivedBy.contains(currentUserUid);
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 0, vertical: 6),
+      child: _glassCard(
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          leading: Container(
+            padding: const EdgeInsets.all(2.2),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              border: Border.all(color: cs.outline.withOpacity(0.60)),
+            ),
+            child: CircleAvatar(
+              radius: 22,
+              backgroundImage:
+              (otherUserPhotoUrl != null && otherUserPhotoUrl.isNotEmpty)
+                  ? NetworkImage(otherUserPhotoUrl)
+                  : null,
+              backgroundColor: cs.surface,
+              child: (otherUserPhotoUrl == null || otherUserPhotoUrl.isEmpty)
+                  ? Icon(Icons.person, color: cs.onSurface.withOpacity(0.75))
+                  : null,
+            ),
+          ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  otherUserName,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w900,
+                    color: isArchivedForUser
+                        ? cs.onSurface.withOpacity(0.60)
+                        : cs.onSurface,
+                  ),
+                ),
+              ),
+              if (isArchivedForUser)
+                Icon(Icons.archive_rounded,
+                    size: 16, color: cs.onSurface.withOpacity(0.55)),
+            ],
+          ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              snippet,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: isArchivedForUser
+                    ? cs.onSurface.withOpacity(0.45)
+                    : cs.onSurface.withOpacity(0.70),
+              ),
+            ),
+          ),
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => ChatDetailScreen(
+                  chatId: chatId,
+                  otherUser: otherUserData..['uid'] = otherUserUid,
+                  callService: widget.callService,
+                ),
+              ),
+            );
+          },
+          onLongPress: () => _showChatOptions(chatId: chatId, chatData: chatData),
+          trailing: PopupMenuButton<String>(
+            iconColor: cs.onSurface.withOpacity(0.60),
+            color: cs.surface.withOpacity(isDark ? 0.92 : 0.98),
+            surfaceTintColor: Colors.transparent,
+            onSelected: (value) async {
+              if (value == 'archive') {
+                await _toggleArchive(chatId, !isArchivedForUser);
+              } else if (value == 'delete') {
+                await _deleteChatForEveryone(chatId);
+              }
+            },
+            itemBuilder: (context) => [
+              PopupMenuItem(
+                value: 'archive',
+                child: Text(
+                  isArchivedForUser ? 'Arşivden Çıkar' : 'Arşive Taşı',
+                  style: TextStyle(color: cs.onSurface, fontWeight: FontWeight.w800),
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'delete',
+                child: Text(
+                  'Sohbeti Sil',
+                  style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -169,463 +500,183 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget build(BuildContext context) {
     final currentUserUid = _auth.currentUser?.uid;
     final t = Theme.of(context);
-    final c = ChatColors.of(t);
+    final cs = t.colorScheme;
+    final isDark = t.brightness == Brightness.dark;
 
     if (currentUserUid == null) {
       return Scaffold(
         appBar: AppBar(title: const Text('Sohbetler')),
-        body: const Center(
-          child: Text('Sohbetleri görmek için giriş yapmalısınız.'),
-        ),
+        body: const Center(child: Text('Sohbetleri görmek için giriş yapmalısınız.')),
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Sohbetler')),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          Navigator.of(context).push(
-            MaterialPageRoute(builder: (context) => const NewChatSearchScreen()),
-          );
-        },
-        backgroundColor: c.brand,
-        foregroundColor: Colors.white,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.all(Radius.circular(12)),
-        ),
-        child: const Icon(Icons.add_comment_rounded),
-      ),
-      body: Column(
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: TextField(
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                color: c.textPrimary,
-              ),
-              decoration: InputDecoration(
-                hintText: 'Sohbetlerde ara...',
-                hintStyle: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: c.textSecondary,
+    // ✅ Stream: arşiv toggle’a göre filtre
+    final baseQuery = _firestore
+        .collection('chats')
+        .where('users', arrayContains: currentUserUid)
+        .where('hasMessages', isEqualTo: true)
+        .orderBy('lastMessageTimestamp', descending: true);
+
+    final stream = baseQuery.snapshots();
+
+    return Stack(
+      children: [
+        Container(decoration: BoxDecoration(gradient: _bgGradient(context))),
+        Scaffold(
+          backgroundColor: Colors.transparent,
+          appBar: _buildTopBar(),
+          floatingActionButton: _showArchived
+              ? null // ✅ Arşivde yeni sohbet başlatma kapalı (istersen açarsın)
+              : FloatingActionButton(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => NewChatSearchScreen(callService: widget.callService),
                 ),
-                prefixIcon: Icon(Icons.search, color: c.iconMuted),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(15),
-                  borderSide: BorderSide.none,
-                ),
-                filled: true,
-                fillColor: c.searchBg,
-              ),
-              onChanged: (_) {},
+              );
+            },
+            backgroundColor: const Color(0xFF6E44FF),
+            foregroundColor: Colors.white,
+            shape: const RoundedRectangleBorder(
+              borderRadius: BorderRadius.all(Radius.circular(14)),
             ),
+            child: const Icon(Icons.add_comment_rounded),
           ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: _firestore
-                  .collection('chats')
-                  .where('users', arrayContains: currentUserUid)
-                  .orderBy('lastMessageTimestamp', descending: true)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-                if (snapshot.hasError) {
-                  return const Center(child: Text('Bir hata oluştu.'));
-                }
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return const Center(child: Text('Hiç sohbetiniz yok.'));
-                }
-
-                final chatDocs = snapshot.data!.docs;
-
-                return ListView.builder(
-                  itemCount: chatDocs.length,
-                  itemBuilder: (context, index) {
-                    final chatDoc = chatDocs[index];
-                    final chatData = chatDoc.data() as Map<String, dynamic>;
-
-                    final clearedAtMapRaw = chatData['clearedAt'];
-                    Timestamp? clearedAtForUser;
-                    if (clearedAtMapRaw is Map) {
-                      final val = clearedAtMapRaw[currentUserUid];
-                      if (val is Timestamp) clearedAtForUser = val;
+          body: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
+                child: _segmentedHeader(),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                child: _glassCard(
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: _showArchived ? 'Arşivde ara...' : 'Sohbetlerde ara...',
+                      hintStyle: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: cs.onSurface.withOpacity(0.60),
+                      ),
+                      prefixIcon: Icon(Icons.search, color: cs.onSurface.withOpacity(0.55)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(18),
+                        borderSide: BorderSide.none,
+                      ),
+                      filled: true,
+                      fillColor: cs.surface.withOpacity(isDark ? 0.10 : 0.40),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+                    ),
+                    onChanged: (_) {},
+                  ),
+                ),
+              ),
+              Expanded(
+                child: StreamBuilder<QuerySnapshot>(
+                  stream: stream,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Center(child: CircularProgressIndicator());
+                    }
+                    if (snapshot.hasError) {
+                      return Center(child: Text('Hata: ${snapshot.error}'));
+                    }
+                    if (!snapshot.hasData) {
+                      return const SizedBox.shrink();
                     }
 
-                    final List<String> userIds = List.from(chatData['users']);
-                    final otherUserUid = userIds.firstWhere(
-                          (uid) => uid != currentUserUid,
-                      orElse: () => '',
-                    );
-                    if (otherUserUid.isEmpty) return const SizedBox.shrink();
+                    final rawDocs = snapshot.data!.docs;
 
-                    return StreamBuilder<QuerySnapshot>(
-                      stream: _firestore
-                          .collection('chats')
-                          .doc(chatDoc.id)
-                          .collection('messages')
-                          .orderBy('timestamp', descending: true)
-                          .limit(10)
-                          .snapshots(),
-                      builder: (context, msgSnapshot) {
-                        if (msgSnapshot.connectionState ==
-                            ConnectionState.waiting) {
-                          return _SkeletonTile(colors: c);
-                        }
+                    // ✅ Client-side filter: archivedBy contains uid?
+                    final docs = rawDocs.where((d) {
+                      final data = d.data() as Map<String, dynamic>;
+                      final List<dynamic> archivedBy = (data['archivedBy'] ?? const []);
+                      final isArchivedForUser = archivedBy.contains(currentUserUid);
+                      return _showArchived ? isArchivedForUser : !isArchivedForUser;
+                    }).toList();
 
-                        if (!msgSnapshot.hasData ||
-                            msgSnapshot.data!.docs.isEmpty) {
-                          return const SizedBox.shrink();
-                        }
+                    if (docs.isEmpty) {
+                      return Center(
+                        child: _glassCard(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Text(
+                              _showArchived ? 'Arşiv boş.' : 'Hiç sohbetiniz yok.',
+                              style: TextStyle(
+                                color: cs.onSurface.withOpacity(0.80),
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
 
-                        final msgDocs = msgSnapshot.data!.docs;
+                    return ListView.builder(
+                      padding: const EdgeInsets.fromLTRB(16, 6, 16, 16),
+                      itemCount: docs.length,
+                      itemBuilder: (context, index) {
+                        final chatDoc = docs[index];
+                        final chatData = chatDoc.data() as Map<String, dynamic>;
 
-                        QueryDocumentSnapshot? lastVisibleMsg;
-                        Map<String, dynamic>? lastVisibleData;
+                        final List<String> userIds =
+                        List<String>.from(chatData['users'] ?? const []);
 
-                        for (var msgDoc in msgDocs) {
-                          final data = msgDoc.data() as Map<String, dynamic>;
-                          final ts = data['timestamp'] as Timestamp?;
-                          final List<dynamic> deletedFor =
-                              data['deletedFor'] ?? [];
-
-                          if (deletedFor.contains(currentUserUid)) continue;
-
-                          if (clearedAtForUser != null &&
-                              ts != null &&
-                              ts.compareTo(clearedAtForUser) <= 0) {
-                            continue;
-                          }
-
-                          lastVisibleMsg = msgDoc;
-                          lastVisibleData = data;
-                          break;
-                        }
-
-                        if (lastVisibleMsg == null || lastVisibleData == null) {
-                          return const SizedBox.shrink();
-                        }
-
-                        String snippet;
-                        final type = lastVisibleData['type'] as String? ?? 'text';
-                        if (type == 'audio') {
-                          snippet = 'Sesli mesaj';
-                        } else {
-                          snippet =
-                              (lastVisibleData['text'] as String? ?? '').trim();
-                          if (snippet.isEmpty) snippet = 'Mesaj';
-                        }
-
-                        final List<dynamic> archivedBy =
-                            chatData['archivedBy'] ?? [];
-                        final bool isArchivedForUser =
-                        archivedBy.contains(currentUserUid);
+                        final otherUserUid = userIds.firstWhere(
+                              (u) => u != currentUserUid,
+                          orElse: () => '',
+                        );
+                        if (otherUserUid.isEmpty) return const SizedBox.shrink();
 
                         return FutureBuilder<DocumentSnapshot>(
-                          future: _firestore
-                              .collection('users')
-                              .doc(otherUserUid)
-                              .get(),
+                          future: _firestore.collection('users').doc(otherUserUid).get(),
                           builder: (context, userSnapshot) {
-                            if (userSnapshot.connectionState ==
-                                ConnectionState.waiting) {
-                              return _SkeletonTile(colors: c);
+                            if (userSnapshot.connectionState == ConnectionState.waiting) {
+                              return _glassCard(
+                                child: const ListTile(title: Text('Yükleniyor...')),
+                              );
                             }
-                            if (!userSnapshot.hasData ||
-                                !userSnapshot.data!.exists) {
-                              return const ListTile(
-                                title: Text('Kullanıcı bulunamadı'),
+                            if (!userSnapshot.hasData || !userSnapshot.data!.exists) {
+                              return _glassCard(
+                                child: const ListTile(title: Text('Kullanıcı bulunamadı')),
                               );
                             }
 
                             final otherUserData =
                             userSnapshot.data!.data() as Map<String, dynamic>;
-                            final otherUserName =
-                                otherUserData['name'] ?? 'Bilinmeyen Kullanıcı';
-                            final otherUserPhotoUrl = otherUserData['photoUrl'];
 
-                            return Container(
-                              margin: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 6),
-                              decoration: BoxDecoration(
-                                color: c.cardBg,
-                                borderRadius: BorderRadius.circular(12),
-                                border:
-                                Border.all(color: c.cardBorder, width: 1),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: c.cardShadow,
-                                    blurRadius: 6,
-                                    offset: const Offset(0, 3),
-                                  ),
-                                ],
-                              ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(
-                                    horizontal: 12, vertical: 6),
-                                leading: CircleAvatar(
-                                  backgroundImage: otherUserPhotoUrl != null
-                                      ? NetworkImage(otherUserPhotoUrl)
-                                      : null,
-                                  backgroundColor: c.avatarBg,
-                                  child: otherUserPhotoUrl == null
-                                      ? Icon(Icons.person, color: c.icon)
-                                      : null,
-                                ),
-                                title: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        otherUserName,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w800,
-                                          color: isArchivedForUser
-                                              ? c.textSecondary
-                                              : c.textPrimary,
-                                        ),
-                                      ),
-                                    ),
-                                    if (isArchivedForUser)
-                                      Icon(Icons.archive_rounded,
-                                          size: 16, color: c.iconMuted),
-                                  ],
-                                ),
-                                subtitle: Text(
-                                  snippet,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(
-                                    color: isArchivedForUser
-                                        ? c.textMuted
-                                        : c.textSecondary,
-                                  ),
-                                ),
-                                onTap: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) => ChatDetailScreen(
-                                        chatId: chatDoc.id,
-                                        otherUser: otherUserData
-                                          ..['uid'] = otherUserUid,
-                                        callService: _callService, // ✅ FIX
-                                      ),
-                                    ),
-                                  );
-                                },
-                                onLongPress: () {
-                                  _showChatOptions(
-                                    chatId: chatDoc.id,
-                                    chatData: chatData,
-                                  );
-                                },
-                                trailing: PopupMenuButton<String>(
-                                  iconColor: c.iconMuted,
-                                  color: c.menuBg,
-                                  surfaceTintColor: Colors.transparent,
-                                  onSelected: (value) async {
-                                    if (value == 'archive') {
-                                      await _toggleArchive(
-                                          chatDoc.id, !isArchivedForUser);
-                                    } else if (value == 'delete') {
-                                      final confirm = await showDialog<bool>(
-                                        context: context,
-                                        builder: (ctx) {
-                                          final tt = Theme.of(ctx);
-                                          final cc = ChatColors.of(tt);
+                            final type = (chatData['lastMessageType'] as String?) ?? 'text';
+                            String snippet;
+                            if (type == 'audio') {
+                              snippet = 'Sesli mesaj';
+                            } else if (type == 'image') {
+                              snippet = 'Fotoğraf';
+                            } else if (type == 'video') {
+                              snippet = 'Video';
+                            } else {
+                              snippet = (chatData['lastMessage'] as String? ?? '').trim();
+                              if (snippet.isEmpty) snippet = 'Mesaj';
+                            }
 
-                                          return AlertDialog(
-                                            backgroundColor: cc.dialogBg,
-                                            surfaceTintColor: Colors.transparent,
-                                            title: Text('Sohbet silinsin mi?',
-                                                style: TextStyle(
-                                                    color: cc.textPrimary)),
-                                            content: Text(
-                                              'Bu işlem sadece senin hesabın için geçerli olacak. '
-                                                  'Sohbet, diğer kullanıcıdan silinmeyecek. '
-                                                  'Yeni mesaj gelirse sohbet tekrar görünür.',
-                                              style: TextStyle(
-                                                  color: cc.textSecondary),
-                                            ),
-                                            actions: [
-                                              TextButton(
-                                                onPressed: () =>
-                                                    Navigator.of(ctx).pop(false),
-                                                child: const Text('Vazgeç'),
-                                              ),
-                                              TextButton(
-                                                onPressed: () =>
-                                                    Navigator.of(ctx).pop(true),
-                                                style: ButtonStyle(
-                                                  foregroundColor:
-                                                  WidgetStatePropertyAll(
-                                                      cc.danger),
-                                                ),
-                                                child: const Text('Sil'),
-                                              ),
-                                            ],
-                                          );
-                                        },
-                                      );
-
-                                      if (confirm == true) {
-                                        await _clearChatForCurrentUser(chatDoc.id);
-                                      }
-                                    }
-                                  },
-                                  itemBuilder: (context) => [
-                                    PopupMenuItem(
-                                      value: 'archive',
-                                      child: Text(
-                                        isArchivedForUser
-                                            ? 'Arşivden çıkar'
-                                            : 'Arşive taşı',
-                                        style: TextStyle(color: c.textPrimary),
-                                      ),
-                                    ),
-                                    PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text(
-                                        'Sohbeti sil',
-                                        style: TextStyle(
-                                          color: c.danger,
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
+                            return _buildChatTile(
+                              chatId: chatDoc.id,
+                              chatData: chatData,
+                              currentUserUid: currentUserUid,
+                              otherUserUid: otherUserUid,
+                              otherUserData: otherUserData,
+                              snippet: snippet,
                             );
                           },
                         );
                       },
                     );
                   },
-                );
-              },
-            ),
+                ),
+              ),
+            ],
           ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SkeletonTile extends StatelessWidget {
-  final ChatColors colors;
-  const _SkeletonTile({required this.colors});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListTile(
-      leading: CircleAvatar(backgroundColor: colors.skeleton1),
-      title: Container(height: 16, width: 100, color: colors.skeleton1),
-      subtitle: Container(height: 12, width: 150, color: colors.skeleton2),
-    );
-  }
-}
-
-class ChatColors {
-  final Color brand;
-  final Color danger;
-
-  final Color textPrimary;
-  final Color textSecondary;
-  final Color textMuted;
-
-  final Color icon;
-  final Color iconMuted;
-
-  final Color searchBg;
-
-  final Color cardBg;
-  final Color cardBorder;
-  final Color cardShadow;
-
-  final Color avatarBg;
-
-  final Color sheetBg;
-  final Color dialogBg;
-  final Color menuBg;
-  final Color divider;
-
-  final Color skeleton1;
-  final Color skeleton2;
-
-  ChatColors._({
-    required this.brand,
-    required this.danger,
-    required this.textPrimary,
-    required this.textSecondary,
-    required this.textMuted,
-    required this.icon,
-    required this.iconMuted,
-    required this.searchBg,
-    required this.cardBg,
-    required this.cardBorder,
-    required this.cardShadow,
-    required this.avatarBg,
-    required this.sheetBg,
-    required this.dialogBg,
-    required this.menuBg,
-    required this.divider,
-    required this.skeleton1,
-    required this.skeleton2,
-  });
-
-  static ChatColors of(ThemeData t) {
-    final cs = t.colorScheme;
-    final isDark = t.brightness == Brightness.dark;
-
-    final brand = const Color(0xFFE57AFF);
-    final danger = Colors.redAccent;
-
-    final cardBg = isDark ? const Color(0xFF0F1116) : Colors.white;
-    final sheetBg = isDark ? const Color(0xFF121317) : Colors.white;
-    final dialogBg = isDark ? const Color(0xFF121317) : Colors.white;
-    final menuBg = isDark ? const Color(0xFF1A1C22) : Colors.white;
-
-    final cardBorder = isDark ? Colors.white10 : Colors.black12;
-    final divider = isDark ? Colors.white10 : Colors.black12;
-
-    final cardShadow = Colors.black.withOpacity(isDark ? 0.18 : 0.10);
-
-    final textPrimary = isDark ? Colors.white : Colors.black87;
-    final textSecondary = isDark ? Colors.white70 : Colors.black54;
-    final textMuted = isDark ? Colors.white54 : Colors.black45;
-
-    final icon = isDark ? Colors.white : cs.onSurface;
-    final iconMuted = isDark ? Colors.white60 : Colors.black45;
-
-    final searchBg = isDark ? const Color(0xFF1A1C22) : Colors.grey.shade200;
-
-    final avatarBg =
-    isDark ? const Color(0xFF1A1C22) : cs.surfaceContainerHighest;
-
-    final skeleton1 = isDark ? Colors.white12 : Colors.grey.shade300;
-    final skeleton2 = isDark ? Colors.white10 : Colors.grey.shade200;
-
-    return ChatColors._(
-      brand: brand,
-      danger: danger,
-      textPrimary: textPrimary,
-      textSecondary: textSecondary,
-      textMuted: textMuted,
-      icon: icon,
-      iconMuted: iconMuted,
-      searchBg: searchBg,
-      cardBg: cardBg,
-      cardBorder: cardBorder,
-      cardShadow: cardShadow,
-      avatarBg: avatarBg,
-      sheetBg: sheetBg,
-      dialogBg: dialogBg,
-      menuBg: menuBg,
-      divider: divider,
-      skeleton1: skeleton1,
-      skeleton2: skeleton2,
+        ),
+      ],
     );
   }
 }

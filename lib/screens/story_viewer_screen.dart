@@ -21,7 +21,8 @@ class StoryViewerScreen extends StatefulWidget {
   State<StoryViewerScreen> createState() => _StoryViewerScreenState();
 }
 
-class _StoryViewerScreenState extends State<StoryViewerScreen> {
+class _StoryViewerScreenState extends State<StoryViewerScreen>
+    with SingleTickerProviderStateMixin {
   final PageController _page = PageController();
   final List<Map<String, dynamic>> _items = [];
 
@@ -31,17 +32,20 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   int _index = 0;
 
   VideoPlayerController? _vc;
-  Timer? _autoTimer;
+
+  // ✅ Progress animasyonu bununla akacak
+  late final AnimationController _progress;
 
   @override
   void initState() {
     super.initState();
+    _progress = AnimationController(vsync: this);
     _load();
   }
 
   @override
   void dispose() {
-    _autoTimer?.cancel();
+    _progress.dispose();
     _disposeVideo();
     _page.dispose();
     super.dispose();
@@ -69,8 +73,6 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         .collection('seen')
         .doc(me.uid);
 
-    // ✅ Ring için stabil kıyas: expiresAt
-    // (createdAt null olabiliyor, expiresAt her zaman dolu olmalı)
     Timestamp? curExpiresAt;
     if (_items.isNotEmpty && _index >= 0 && _index < _items.length) {
       final cur = _items[_index];
@@ -80,15 +82,9 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
     await seenRef.set({
       'viewerUid': me.uid,
-
-      // Eski alanların dursun (analytics vs.)
       'seenAt': FieldValue.serverTimestamp(),
       'seenAtClient': Timestamp.now(),
-
-      // ✅ StoriesStrip bununla "izlendi mi" karar veriyor
       if (curExpiresAt != null) 'lastSeenExpiresAt': curExpiresAt,
-
-      // İstersen bu da kalsın (debug için faydalı)
       'lastSeenAt': FieldValue.serverTimestamp(),
       'lastSeenAtClient': Timestamp.now(),
     }, SetOptions(merge: true));
@@ -105,7 +101,6 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     try {
       final now = Timestamp.now();
 
-      // ✅ SUBCOLLECTION OKU: stories/{uid}/items
       final q = await FirebaseFirestore.instance
           .collection('stories')
           .doc(widget.ownerUid)
@@ -130,14 +125,12 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
 
         parsed.add({
           ...m,
-          // normalize
           'type': type,
           'url': url,
           'docId': d.id,
         });
       }
 
-      // ✅ createdAt varsa ona göre sırala, yoksa client backup
       parsed.sort((a, b) {
         final ta = a['createdAt'];
         final tb = b['createdAt'];
@@ -168,10 +161,8 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         _index = 0;
       });
 
-      // ✅ seen yaz (halkayı gri yapmak için)
       unawaited(_markSeen());
 
-      // İlk item hazırlığı
       await _prepareCurrent();
     } catch (e) {
       if (!mounted) return;
@@ -183,13 +174,18 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
   }
 
   Future<void> _prepareCurrent() async {
-    _autoTimer?.cancel();
+    _progress.stop();
+    _progress.reset();
     _disposeVideo();
 
     if (!mounted) return;
 
     final type = (_current['type'] ?? '').toString().trim().toLowerCase();
     final url = (_current['url'] ?? '').toString().trim();
+
+    // ✅ progress tamamlanınca otomatik next
+    _progress.removeStatusListener(_onProgressStatus);
+    _progress.addStatusListener(_onProgressStatus);
 
     if (type == 'video') {
       if (url.isEmpty) {
@@ -207,13 +203,19 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         await c.setLooping(false);
         await c.play();
 
+        final d = c.value.duration;
+        final dur = (d.inMilliseconds > 200) ? d : const Duration(seconds: 8);
+
+        _progress.duration = dur;
+        _progress.forward();
+
+        // Video bitti mi -> next (progress zaten completed olabilir ama garanti)
         c.addListener(() {
           if (!mounted) return;
           final v = _vc;
           if (v == null) return;
 
           if (v.value.isInitialized &&
-              !v.value.isPlaying &&
               v.value.position >= v.value.duration &&
               v.value.duration.inMilliseconds > 0) {
             _next();
@@ -224,10 +226,18 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         return;
       }
     } else {
-      _autoTimer = Timer(const Duration(seconds: 6), _next);
+      // ✅ foto: 6 sn
+      _progress.duration = const Duration(seconds: 6);
+      _progress.forward();
     }
 
     setState(() {});
+  }
+
+  void _onProgressStatus(AnimationStatus s) {
+    if (s == AnimationStatus.completed) {
+      _next();
+    }
   }
 
   void _next() {
@@ -239,11 +249,13 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     }
 
     setState(() => _index++);
+
     _page.animateToPage(
       _index,
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
     );
+
     _prepareCurrent();
   }
 
@@ -252,12 +264,26 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
     if (_index <= 0) return;
 
     setState(() => _index--);
+
     _page.animateToPage(
       _index,
       duration: const Duration(milliseconds: 220),
       curve: Curves.easeOut,
     );
+
     _prepareCurrent();
+  }
+
+  void _pause() {
+    _progress.stop();
+    _vc?.pause();
+  }
+
+  void _resume() {
+    if (_items.isEmpty) return;
+    _progress.forward();
+    final curType = (_current['type'] ?? '').toString().toLowerCase();
+    if (curType == 'video') _vc?.play();
   }
 
   @override
@@ -274,24 +300,21 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
         )
             : Stack(
           children: [
+            // CONTENT
             PageView.builder(
               controller: _page,
               physics: const NeverScrollableScrollPhysics(),
               itemCount: _items.length,
               itemBuilder: (context, i) {
                 final item = _items[i];
-                final type = (item['type'] ?? '')
-                    .toString()
-                    .trim()
-                    .toLowerCase();
+                final type =
+                (item['type'] ?? '').toString().trim().toLowerCase();
                 final url = (item['url'] ?? '').toString().trim();
 
                 if (type == 'video') {
                   final v = (i == _index) ? _vc : null;
                   if (v == null || !v.value.isInitialized) {
-                    return const Center(
-                      child: CircularProgressIndicator(),
-                    );
+                    return const Center(child: CircularProgressIndicator());
                   }
                   return Center(
                     child: AspectRatio(
@@ -308,13 +331,11 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                     child: Image.network(
                       url,
                       fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) =>
-                      const _BrokenItem(),
+                      errorBuilder: (_, __, ___) => const _BrokenItem(),
                       loadingBuilder: (ctx, child, p) {
                         if (p == null) return child;
                         return const Center(
-                          child: CircularProgressIndicator(),
-                        );
+                            child: CircularProgressIndicator());
                       },
                     ),
                   ),
@@ -322,11 +343,23 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
               },
             ),
 
-            // Üst bar
+            // PROGRESS (AKAN)
+            Positioned(
+              left: 10,
+              right: 10,
+              top: 6,
+              child: _StoryProgressBar(
+                count: _items.length,
+                activeIndex: _index,
+                controller: _progress,
+              ),
+            ),
+
+            // TOP BAR
             Positioned(
               left: 12,
               right: 12,
-              top: 10,
+              top: 18,
               child: Row(
                 children: [
                   _OwnerAvatar(photoUrl: widget.ownerPhotoUrl),
@@ -352,55 +385,25 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
               ),
             ),
 
-            // Progress bar
-            Positioned(
-              left: 10,
-              right: 10,
-              top: 0,
-              child: Row(
-                children: List.generate(_items.length, (i) {
-                  final active = i == _index;
-                  final done = i < _index;
-                  return Expanded(
-                    child: Container(
-                      margin:
-                      const EdgeInsets.symmetric(horizontal: 2),
-                      height: 3,
-                      decoration: BoxDecoration(
-                        color: done
-                            ? Colors.white
-                            : active
-                            ? Colors.white.withOpacity(0.85)
-                            : Colors.white.withOpacity(0.25),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-            ),
-
-            // Sol/sağ tap alanları
+            // TAP AREAS + LONG PRESS PAUSE
             Positioned.fill(
-              child: Row(
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _prev,
-                    ),
-                  ),
-                  Expanded(
-                    child: GestureDetector(
-                      behavior: HitTestBehavior.opaque,
-                      onTap: _next,
-                    ),
-                  ),
-                ],
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onLongPressStart: (_) => _pause(),
+                onLongPressEnd: (_) => _resume(),
+                onTapDown: (d) {
+                  final w = MediaQuery.of(context).size.width;
+                  if (d.globalPosition.dx < w * 0.35) {
+                    _prev();
+                  } else {
+                    _next();
+                  }
+                },
+                child: const SizedBox.expand(),
               ),
             ),
 
-            // Alt ipucu
+            // ALT İPUCU
             Positioned(
               left: 0,
               right: 0,
@@ -416,7 +419,7 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
                         color: Colors.white.withOpacity(0.18)),
                   ),
                   child: Text(
-                    'İleri/geri için dokun',
+                    'İleri/geri için dokun • basılı tut: durdur',
                     style: TextStyle(
                       color: Colors.white.withOpacity(0.85),
                       fontWeight: FontWeight.w700,
@@ -429,6 +432,55 @@ class _StoryViewerScreenState extends State<StoryViewerScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _StoryProgressBar extends StatelessWidget {
+  final int count;
+  final int activeIndex;
+  final AnimationController controller;
+
+  const _StoryProgressBar({
+    required this.count,
+    required this.activeIndex,
+    required this.controller,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (_, __) {
+        return Row(
+          children: List.generate(count, (i) {
+            final double v;
+            if (i < activeIndex) {
+              v = 1.0;
+            } else if (i == activeIndex) {
+              v = controller.value; // ✅ AKIYOR
+            } else {
+              v = 0.0;
+            }
+
+            return Expanded(
+              child: Padding(
+                padding: EdgeInsets.only(right: i == count - 1 ? 0 : 6),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(999),
+                  child: LinearProgressIndicator(
+                    value: v,
+                    minHeight: 3,
+                    backgroundColor: Colors.white.withOpacity(0.25),
+                    valueColor:
+                    const AlwaysStoppedAnimation<Color>(Colors.white),
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 }
@@ -510,8 +562,8 @@ class _ErrorView extends StatelessWidget {
             const SizedBox(height: 10),
             TextButton(
               onPressed: onClose,
-              child: const Text('Kapat',
-                  style: TextStyle(color: Colors.white)),
+              child:
+              const Text('Kapat', style: TextStyle(color: Colors.white)),
             )
           ],
         ),

@@ -9,6 +9,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'services/notification_service.dart';
 import 'providers/theme_provider.dart';
+import 'providers/cv_analysis_provider.dart';
 
 import 'theme/light_theme.dart';
 import 'theme/dark_theme.dart';
@@ -74,10 +75,6 @@ Future<void> main() async {
     // ✅ İzin iste (bu ok)
     await messaging.requestPermission(alert: true, badge: true, sound: true);
 
-    // ❌ TOKEN BURADA ALINMAYACAK!
-    // final token = await messaging.getToken();
-    // debugPrint("🔥 FCM TOKEN: $token");
-
     // ✅ Servis init
     NotificationService().initialize();
     setupForegroundNotificationListener();
@@ -89,8 +86,11 @@ Future<void> main() async {
   await inAppNotificationService.loadFromPrefs();
 
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => ThemeProvider(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
+        ChangeNotifierProvider(create: (_) => CvAnalysisProvider()),
+      ],
       child: const MyApp(),
     ),
   );
@@ -131,7 +131,7 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final themeProvider = Provider.of<ThemeProvider>(context);
+    final themeProvider = context.watch<ThemeProvider>();
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,

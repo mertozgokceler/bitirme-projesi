@@ -1,3 +1,7 @@
+// lib/screens/my_applications_screen.dart
+
+import 'dart:ui';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
@@ -64,13 +68,174 @@ AppStageInfo computeStage(Map<String, dynamic> app) {
     return const AppStageInfo(AppStageKey.interview, 'Mülakat aşaması', Colors.green);
   }
 
-  // status accepted ama test yoksa da mülakata gidebilir (senin modelin böyle)
+  // status accepted ama test yoksa da mülakata gidebilir
   if (status == 'accepted') {
     return const AppStageInfo(AppStageKey.interview, 'Mülakat aşaması', Colors.green);
   }
 
   // 4) default
   return const AppStageInfo(AppStageKey.review, 'İnceleniyor', Colors.grey);
+}
+
+// =====================
+// PREMIUM UI HELPERS (CvAnalysis look & feel)
+// =====================
+
+LinearGradient _bgGradient(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
+  if (isDark) {
+    return const LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Color(0xFF0B1220),
+        Color(0xFF0A1B2E),
+        Color(0xFF081829),
+      ],
+    );
+  }
+  return const LinearGradient(
+    begin: Alignment.topLeft,
+    end: Alignment.bottomRight,
+    colors: [
+      Color(0xFFF6FAFF),
+      Color(0xFFEFF6FF),
+      Color(0xFFF9FBFF),
+    ],
+  );
+}
+
+Widget _glassCard(
+    BuildContext context, {
+      required Widget child,
+      EdgeInsets padding = const EdgeInsets.all(14),
+      BorderRadius borderRadius = const BorderRadius.all(Radius.circular(18)),
+    }) {
+  final theme = Theme.of(context);
+  final isDark = theme.brightness == Brightness.dark;
+
+  return ClipRRect(
+    borderRadius: borderRadius,
+    child: BackdropFilter(
+      filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+      child: Container(
+        padding: padding,
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surface.withOpacity(isDark ? 0.78 : 0.92),
+          borderRadius: borderRadius,
+          border: Border.all(
+            color: theme.colorScheme.outlineVariant.withOpacity(isDark ? 0.28 : 0.45),
+          ),
+          boxShadow: [
+            BoxShadow(
+              blurRadius: 22,
+              spreadRadius: 2,
+              color: Colors.black.withOpacity(isDark ? 0.22 : 0.08),
+            ),
+          ],
+        ),
+        child: child,
+      ),
+    ),
+  );
+}
+
+Widget _iconPill(BuildContext context, IconData icon, {Color? color}) {
+  final theme = Theme.of(context);
+  return Container(
+    width: 44,
+    height: 44,
+    decoration: BoxDecoration(
+      color: theme.colorScheme.surfaceVariant.withOpacity(
+        theme.brightness == Brightness.dark ? 0.18 : 0.65,
+      ),
+      borderRadius: BorderRadius.circular(14),
+      border: Border.all(
+        color: theme.colorScheme.outlineVariant.withOpacity(0.25),
+      ),
+    ),
+    child: Center(
+      child: Icon(icon, color: color ?? theme.colorScheme.onSurfaceVariant),
+    ),
+  );
+}
+
+class _GlowBlob extends StatelessWidget {
+  final double size;
+  final Color color;
+  const _GlowBlob({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(colors: [color, color.withOpacity(0.0)]),
+        ),
+      ),
+    );
+  }
+}
+
+Widget _primaryGradientButton(
+    BuildContext context, {
+      required String text,
+      required VoidCallback? onPressed,
+      IconData? icon,
+    }) {
+  final theme = Theme.of(context);
+  final isDark = theme.brightness == Brightness.dark;
+
+  final disabled = onPressed == null;
+
+  const gradient = LinearGradient(colors: [Color(0xFF6D5DF6), Color(0xFF4FC3F7)]);
+
+  return SizedBox(
+    height: 44,
+    child: disabled
+        ? ElevatedButton.icon(
+      onPressed: null,
+      icon: Icon(icon ?? Icons.lock_outline, size: 18),
+      label: Text(text, style: const TextStyle(fontWeight: FontWeight.w900)),
+      style: ElevatedButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    )
+        : DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: gradient,
+        borderRadius: BorderRadius.circular(14),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF6D5DF6).withOpacity(isDark ? 0.40 : 0.28),
+            blurRadius: 14,
+            offset: const Offset(0, 6),
+          ),
+        ],
+      ),
+      child: ElevatedButton.icon(
+        onPressed: onPressed,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
+        icon: Icon(icon ?? Icons.arrow_forward_rounded, size: 18, color: Colors.white),
+        label: Text(
+          text,
+          style: const TextStyle(
+            fontWeight: FontWeight.w900,
+            color: Colors.white,
+            letterSpacing: 0.2,
+            shadows: [Shadow(offset: Offset(0, 1), blurRadius: 3, color: Colors.black26)],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 // =====================
@@ -83,6 +248,7 @@ class MyApplicationsScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
+    final cs = Theme.of(context).colorScheme;
 
     if (uid == null) {
       return const Scaffold(
@@ -93,34 +259,53 @@ class MyApplicationsScreen extends StatelessWidget {
     return DefaultTabController(
       length: 4,
       child: Scaffold(
+        extendBodyBehindAppBar: true,
         appBar: AppBar(
           title: const Text('Başvurularım'),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          foregroundColor: cs.onSurface,
           bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(48),
-            child: Align(
-              alignment: Alignment.center,
-              child: TabBar(
-                isScrollable: true,
-                tabAlignment: TabAlignment.center,
-                labelPadding: const EdgeInsets.symmetric(horizontal: 18),
-                indicatorSize: TabBarIndicatorSize.label,
-                indicatorWeight: 3,
-                tabs: const [
-                  Tab(text: 'Hepsi'),
-                  Tab(text: 'Beklemede'),
-                  Tab(text: 'Kabul'),
-                  Tab(text: 'Red'),
-                ],
+            preferredSize: const Size.fromHeight(56),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+              child: _glassCard(
+                context,
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                borderRadius: BorderRadius.circular(16),
+                child: TabBar(
+                  isScrollable: true,
+                  tabAlignment: TabAlignment.center,
+                  labelPadding: const EdgeInsets.symmetric(horizontal: 16),
+                  indicatorSize: TabBarIndicatorSize.label,
+                  indicatorWeight: 3,
+                  dividerColor: Colors.transparent,
+                  tabs: const [
+                    Tab(text: 'Hepsi'),
+                    Tab(text: 'Beklemede'),
+                    Tab(text: 'Kabul'),
+                    Tab(text: 'Red'),
+                  ],
+                ),
               ),
             ),
           ),
         ),
-        body: TabBarView(
+        body: Stack(
           children: [
-            _MyApplicationsList(uid: uid, statuses: null), // HEPSİ
-            _MyApplicationsList(uid: uid, statuses: const ['new', 'seen']),
-            _MyApplicationsList(uid: uid, statuses: const ['accepted']),
-            _MyApplicationsList(uid: uid, statuses: const ['rejected']),
+            Container(decoration: BoxDecoration(gradient: _bgGradient(context))),
+            Positioned(top: -120, left: -80, child: _GlowBlob(size: 260, color: cs.primary.withOpacity(0.20))),
+            Positioned(bottom: -140, right: -90, child: _GlowBlob(size: 280, color: cs.tertiary.withOpacity(0.18))),
+            SafeArea(
+              child: TabBarView(
+                children: [
+                  _MyApplicationsList(uid: uid, statuses: null),
+                  _MyApplicationsList(uid: uid, statuses: const ['new', 'seen']),
+                  _MyApplicationsList(uid: uid, statuses: const ['accepted']),
+                  _MyApplicationsList(uid: uid, statuses: const ['rejected']),
+                ],
+              ),
+            ),
           ],
         ),
       ),
@@ -161,11 +346,26 @@ class _MyApplicationsList extends StatelessWidget {
 
         final docs = snap.data?.docs ?? [];
         if (docs.isEmpty) {
-          return const Center(child: Text('Bu filtrede başvuru yok.'));
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: _glassCard(
+                context,
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.inbox_outlined, size: 34),
+                    SizedBox(height: 10),
+                    Text('Bu filtrede başvuru yok.', style: TextStyle(fontWeight: FontWeight.w800)),
+                  ],
+                ),
+              ),
+            ),
+          );
         }
 
         return ListView.separated(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 18),
           itemCount: docs.length,
           separatorBuilder: (_, __) => const SizedBox(height: 10),
           itemBuilder: (context, i) {
@@ -179,16 +379,13 @@ class _MyApplicationsList extends StatelessWidget {
             final createdAt = _tsToDateTime(m['createdAt']);
             final decisionAt = _tsToDateTime(m['decisionAt']);
 
-            final test = (m['test'] is Map)
-                ? Map<String, dynamic>.from(m['test'] as Map)
-                : <String, dynamic>{};
+            final test = (m['test'] is Map) ? Map<String, dynamic>.from(m['test'] as Map) : <String, dynamic>{};
 
             final testId = (test['testId'] ?? 'default').toString().trim();
             final jobId = (m['jobId'] ?? '').toString().trim();
             final appPath = d.reference.path;
 
             final stageInfo = computeStage(m);
-
             final canEnterTest = stageInfo.key == AppStageKey.testAssigned;
 
             return _MyAppTile(
@@ -234,9 +431,7 @@ class _MyApplicationsList extends StatelessWidget {
     final createdAt = _tsToDateTime(data['createdAt']);
     final decisionAt = _tsToDateTime(data['decisionAt']);
 
-    final test = (data['test'] is Map)
-        ? Map<String, dynamic>.from(data['test'] as Map)
-        : <String, dynamic>{};
+    final test = (data['test'] is Map) ? Map<String, dynamic>.from(data['test'] as Map) : <String, dynamic>{};
 
     final testStatus = (test['status'] ?? '').toString().trim();
     final score = test['score'];
@@ -254,77 +449,87 @@ class _MyApplicationsList extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
+      backgroundColor: Colors.transparent,
       builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: EdgeInsets.only(
-              left: 16,
-              right: 16,
-              top: 8,
-              bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
-            ),
-            child: SingleChildScrollView(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          jobTitle.isEmpty ? '(Pozisyon adı yok)' : jobTitle,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w900,
-                          ),
+        final cs = Theme.of(ctx).colorScheme;
+
+        return Stack(
+          children: [
+            Container(decoration: BoxDecoration(gradient: _bgGradient(ctx))),
+            Positioned(top: -120, left: -80, child: _GlowBlob(size: 240, color: cs.primary.withOpacity(0.18))),
+            Positioned(bottom: -140, right: -90, child: _GlowBlob(size: 260, color: cs.tertiary.withOpacity(0.16))),
+            SafeArea(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 12,
+                  right: 12,
+                  top: 10,
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 12,
+                ),
+                child: _glassCard(
+                  ctx,
+                  borderRadius: BorderRadius.circular(20),
+                  padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                jobTitle.isEmpty ? '(Pozisyon adı yok)' : jobTitle,
+                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900),
+                              ),
+                            ),
+                            _StatusPill(status: status, forApplicant: true),
+                          ],
                         ),
-                      ),
-                      _StatusPill(status: status, forApplicant: true),
-                    ],
+                        if (companyName.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(companyName, style: TextStyle(color: Theme.of(ctx).hintColor, fontWeight: FontWeight.w700)),
+                        ],
+                        const SizedBox(height: 14),
+
+                        _kv(ctx, 'Durum', _statusLabel(status, forApplicant: true)),
+                        _kv(ctx, 'Aşama', stageInfo.label),
+                        if (testStatus.isNotEmpty) _kv(ctx, 'Test', _testLabel(testStatus)),
+                        if (score != null) _kv(ctx, 'Skor', score.toString()),
+                        _kv(ctx, 'Başvuru Tarihi', _fmt(createdAt)),
+                        if (decisionAt != null) _kv(ctx, 'Karar Tarihi', _fmt(decisionAt)),
+                        _kv(ctx, 'Kayıt Yolu', docPath),
+
+                        const SizedBox(height: 10),
+                        Divider(color: Theme.of(ctx).dividerColor.withOpacity(0.5), height: 22),
+
+                        if (email.isNotEmpty) _kv(ctx, 'E-posta', email),
+                        if (phone.isNotEmpty) _kv(ctx, 'Telefon', phone),
+                        if (portfolio.isNotEmpty) _kv(ctx, 'Portföy', portfolio),
+                        if (linkedin.isNotEmpty) _kv(ctx, 'LinkedIn', linkedin),
+                        if (cvUrl.isNotEmpty) _kv(ctx, 'CV', cvUrl),
+
+                        if (cover.isNotEmpty) ...[
+                          const SizedBox(height: 12),
+                          const Text('Ön Yazı', style: TextStyle(fontWeight: FontWeight.w900)),
+                          const SizedBox(height: 6),
+                          Text(cover, style: const TextStyle(height: 1.3)),
+                        ],
+
+                        const SizedBox(height: 14),
+                      ],
+                    ),
                   ),
-                  if (companyName.isNotEmpty) ...[
-                    const SizedBox(height: 6),
-                    Text(companyName, style: TextStyle(color: Colors.grey.shade600)),
-                  ],
-                  const SizedBox(height: 14),
-
-                  _kv('Durum', _statusLabel(status, forApplicant: true)),
-                  _kv('Aşama', stageInfo.label),
-                  if (testStatus.isNotEmpty) _kv('Test', _testLabel(testStatus)),
-                  if (score != null) _kv('Skor', score.toString()),
-
-                  _kv('Başvuru Tarihi', _fmt(createdAt)),
-                  if (decisionAt != null) _kv('Karar Tarihi', _fmt(decisionAt)),
-                  _kv('Kayıt Yolu', docPath),
-
-                  const Divider(height: 24),
-
-                  if (email.isNotEmpty) _kv('E-posta', email),
-                  if (phone.isNotEmpty) _kv('Telefon', phone),
-                  if (portfolio.isNotEmpty) _kv('Portföy', portfolio),
-                  if (linkedin.isNotEmpty) _kv('LinkedIn', linkedin),
-                  if (cvUrl.isNotEmpty) _kv('CV', cvUrl),
-
-                  if (cover.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    const Text('Ön Yazı', style: TextStyle(fontWeight: FontWeight.w900)),
-                    const SizedBox(height: 6),
-                    Text(cover),
-                  ],
-
-                  const SizedBox(height: 16),
-                ],
+                ),
               ),
             ),
-          ),
+          ],
         );
       },
     );
   }
 
-  Widget _kv(String k, String v) {
+  Widget _kv(BuildContext context, String k, String v) {
+    final theme = Theme.of(context);
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(
@@ -332,9 +537,14 @@ class _MyApplicationsList extends StatelessWidget {
         children: [
           SizedBox(
             width: 120,
-            child: Text(k, style: TextStyle(color: Colors.grey.shade600)),
+            child: Text(k, style: TextStyle(color: theme.hintColor, fontWeight: FontWeight.w700)),
           ),
-          Expanded(child: Text(v)),
+          Expanded(
+            child: Text(
+              v.isEmpty ? '-' : v,
+              style: TextStyle(color: theme.colorScheme.onSurface, fontWeight: FontWeight.w700),
+            ),
+          ),
         ],
       ),
     );
@@ -399,26 +609,20 @@ class _MyAppTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final border = isDark ? Colors.white.withOpacity(0.08) : Colors.black.withOpacity(0.08);
+    final theme = Theme.of(context);
 
     return InkWell(
-      borderRadius: BorderRadius.circular(14),
+      borderRadius: BorderRadius.circular(18),
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: border),
-        ),
+      child: _glassCard(
+        context,
+        padding: const EdgeInsets.all(14),
+        borderRadius: BorderRadius.circular(18),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.only(top: 2),
-              child: Icon(Icons.work_outline),
-            ),
-            const SizedBox(width: 10),
+            _iconPill(context, Icons.work_outline),
+            const SizedBox(width: 12),
 
             Expanded(
               child: Column(
@@ -427,40 +631,38 @@ class _MyAppTile extends StatelessWidget {
                   Text(jobTitle, style: const TextStyle(fontWeight: FontWeight.w900)),
                   if (companyName.isNotEmpty) ...[
                     const SizedBox(height: 4),
-                    Text(companyName, style: TextStyle(color: Colors.grey.shade600)),
+                    Text(companyName, style: TextStyle(color: theme.hintColor, fontWeight: FontWeight.w700)),
                   ],
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   _StagePill(stageInfo: stageInfo),
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 10),
                   Text(
                     'Başvuru: ${_fmt(createdAt)}'
                         '${decisionAt != null ? '  •  Karar: ${_fmt(decisionAt)}' : ''}',
-                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                    style: TextStyle(color: theme.hintColor, fontSize: 12, fontWeight: FontWeight.w700),
                   ),
 
                   if (canEnterTest) ...[
-                    const SizedBox(height: 10),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: ElevatedButton.icon(
-                        onPressed: jobId.trim().isEmpty
-                            ? null
-                            : () {
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => JobTestScreen(
-                                jobId: jobId,
-                                applicationPath: docPath,
-                                testId: testId.isEmpty ? 'default' : testId,
-                              ),
+                    const SizedBox(height: 12),
+                    _primaryGradientButton(
+                      context,
+                      text: 'Teste Gir',
+                      icon: Icons.quiz_outlined,
+                      onPressed: jobId.trim().isEmpty
+                          ? null
+                          : () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => JobTestScreen(
+                              jobId: jobId,
+                              applicationPath: docPath,
+                              testId: testId.isEmpty ? 'default' : testId,
                             ),
-                          );
-                        },
-                        icon: const Icon(Icons.quiz_outlined, size: 18),
-                        label: const Text('Teste Gir'),
-                      ),
+                          ),
+                        );
+                      },
                     ),
                   ],
                 ],
@@ -492,15 +694,20 @@ class _StagePill extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: stageInfo.color.withOpacity(0.12),
+        color: stageInfo.color.withOpacity(theme.brightness == Brightness.dark ? 0.18 : 0.12),
+        border: Border.all(
+          color: stageInfo.color.withOpacity(theme.brightness == Brightness.dark ? 0.26 : 0.22),
+        ),
       ),
       child: Text(
         stageInfo.label,
-        style: TextStyle(color: stageInfo.color, fontWeight: FontWeight.w800),
+        style: TextStyle(color: stageInfo.color, fontWeight: FontWeight.w900),
       ),
     );
   }
@@ -514,16 +721,18 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final map = _statusUI(status, context, forApplicant: forApplicant);
+    final theme = Theme.of(context);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(999),
-        color: map.color.withOpacity(0.12),
+        color: map.color.withOpacity(theme.brightness == Brightness.dark ? 0.18 : 0.12),
+        border: Border.all(color: map.color.withOpacity(theme.brightness == Brightness.dark ? 0.28 : 0.22)),
       ),
       child: Text(
         map.label,
-        style: TextStyle(color: map.color, fontWeight: FontWeight.w800),
+        style: TextStyle(color: map.color, fontWeight: FontWeight.w900),
       ),
     );
   }

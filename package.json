@@ -1,5 +1,29 @@
 {
   "dependencies": {
-    "@sendgrid/mail": "^8.1.6"
-  }
+    "@sendgrid/mail": "^8.1.6",
+    "firebase-admin": "^13.6.0"
+  },
+  "name": "techconnect",
+  "version": "1.0.0",
+  "description": "TechConnect, yazılım geliştiriciler ile teknoloji şirketlerini tek bir platformda buluşturan, yapay zekâ destekli bir mobil uygulamadır.  \r Bu proje, Bartın Üniversitesi Bilgisayar Mühendisliği Bitirme Projesi kapsamında geliştirilmiştir.",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib",
+    "test": "test"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mertozgokceler/bitirme-projesi.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/mertozgokceler/bitirme-projesi/issues"
+  },
+  "homepage": "https://github.com/mertozgokceler/bitirme-projesi#readme"
 }

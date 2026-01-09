@@ -22,10 +22,11 @@ import '../screens/chat_list_screen.dart';
 import '../screens/create_post_screen.dart';
 import '../screens/create_job_post_screen.dart';
 import '../screens/subscription_plans_screen.dart';
+import '../screens/chat_detail_screen.dart';
 
-// separated widgets/sheets/screens (senin projede path farklı olabilir)
-import '../tabs/search_tab.dart'; // SearchTab burada değilse path’i düzelt
-import '../widgets/ai_career_advisor_sheet.dart'; // AiCareerAdvisorSheet burada değilse path’i düzelt
+// separated widgets/sheets/screens
+import '../tabs/search_tab.dart';
+import '../widgets/ai_career_advisor_sheet.dart';
 
 // location
 import '../services/location_service.dart';
@@ -37,7 +38,7 @@ import '../services/incoming_call_service.dart';
 import '../screens/incoming_call_screen.dart';
 
 // theme tokens
-import '../theme/app_colors.dart'; // AppColors burada değilse path’i düzelt
+import '../theme/app_colors.dart';
 
 const String kLogoPath = 'assets/images/techconnectlogo.png';
 const String kLogoGoldPath = 'assets/images/techconnect_logo_gold.png';
@@ -84,13 +85,8 @@ class _MainNavShellState extends State<MainNavShell>
   // auth changes
   StreamSubscription<User?>? _authSub;
 
-  final _pages = const [
-    HomeTab(),
-    JobsTab(),
-    AddPostTab(),
-    NotificationsTab(),
-    ProfileTab(),
-  ];
+  // ✅ artık const değil
+  late final List<Widget> _pages;
 
   @override
   void initState() {
@@ -102,10 +98,36 @@ class _MainNavShellState extends State<MainNavShell>
     inAppNotificationService.loadFromPrefs();
     _initNotificationsForCurrentUser();
 
+    // ✅ NOTIFICATION TAP ROUTER (tek yer)
+    inAppNotificationService.tappedNotification.addListener(_onTappedNotification);
+
     _aiPulseController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1400),
     )..repeat(reverse: true);
+
+    // ✅ HomeTab callback’leri burada bağlandı
+    _pages = [
+      HomeTab(
+        callService: _callService,
+        onGoToSearchTab: () {
+          if (!mounted) return;
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SearchTab()),
+          );
+        },
+        onGoToMessages: () {
+          if (!mounted) return;
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => ChatListScreen(callService: _callService)),
+          );
+        },
+      ),
+      const JobsTab(),
+      const AddPostTab(),
+      const NotificationsTab(),
+      const ProfileTab(),
+    ];
 
     _loadAccountType();
     _listenPremiumStatus();
@@ -124,7 +146,6 @@ class _MainNavShellState extends State<MainNavShell>
       }
       _startIncomingCallServiceListener();
 
-      // user değiştiyse cache’leri sıfırla (tavsiye)
       _chatsWarmupDone = false;
       _lastSeenChatTs.clear();
       _incomingReqInitialized = false;
@@ -145,6 +166,8 @@ class _MainNavShellState extends State<MainNavShell>
     _authSub?.cancel();
     _premiumSub?.cancel();
 
+    inAppNotificationService.tappedNotification.removeListener(_onTappedNotification);
+
     _incomingCallService.dispose();
     _aiPulseController.dispose();
 
@@ -154,6 +177,84 @@ class _MainNavShellState extends State<MainNavShell>
   Future<void> _initNotificationsForCurrentUser() async {
     final user = _auth.currentUser;
     await inAppNotificationService.initForUser(user?.uid);
+  }
+
+  void _onTappedNotification() {
+    final n = inAppNotificationService.tappedNotification.value;
+    if (n == null) return;
+
+    // consume first (double-trigger engelle)
+    inAppNotificationService.tappedNotification.value = null;
+
+    if (!mounted) return;
+
+    // okundu
+    inAppNotificationService.markAsRead(n.id);
+
+    final type = n.type.trim().toLowerCase();
+    final data = n.data;
+
+    switch (type) {
+      case 'message':
+        {
+          final chatId = (data['chatId'] ?? '').toString();
+          final otherUserId =
+          (data['peerId'] ?? data['senderId'] ?? data['otherUserId'] ?? '').toString();
+          final otherUserName =
+          (data['peerName'] ?? data['senderName'] ?? n.title).toString();
+          final otherUserPhoto =
+          (data['peerPhotoUrl'] ?? data['senderPhotoUrl'] ?? '').toString();
+
+          if (chatId.isEmpty || otherUserId.isEmpty) {
+            Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => ChatListScreen(callService: _callService)),
+            );
+            break;
+          }
+
+          final otherUser = <String, dynamic>{
+            'id': otherUserId,
+            'uid': otherUserId,
+            'userId': otherUserId,
+            'name': otherUserName,
+            'username': otherUserName.startsWith('@')
+                ? otherUserName.substring(1)
+                : otherUserName,
+            'photoUrl': otherUserPhoto,
+            'profilePhotoUrl': otherUserPhoto,
+          };
+
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => ChatDetailScreen(
+                chatId: chatId,
+                otherUser: otherUser,
+                callService: _callService,
+              ),
+            ),
+          );
+          break;
+        }
+
+      case 'match':
+        setState(() => _index = 1);
+        break;
+
+      case 'follow':
+        setState(() => _index = 4);
+        break;
+
+      case 'like':
+      case 'comment':
+        setState(() => _index = 0);
+        break;
+
+      default:
+        setState(() => _index = 3);
+        break;
+    }
+
+    debugPrint('DEBUG[notifTap] type=$type data=$data');
   }
 
   // ===================== LOCATION =====================
@@ -196,10 +297,8 @@ class _MainNavShellState extends State<MainNavShell>
     if (user == null) return;
 
     try {
-      final snap = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
+      final snap =
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
 
       final data = snap.data() as Map<String, dynamic>? ?? {};
 
@@ -233,9 +332,7 @@ class _MainNavShellState extends State<MainNavShell>
     final now = DateTime.now();
     final validByDate = untilDt != null && untilDt.isAfter(now);
 
-    // Tarih varsa esas al
     if (untilDt != null) return validByDate;
-
     return isPremiumFlag;
   }
 
@@ -261,7 +358,6 @@ class _MainNavShellState extends State<MainNavShell>
         _premiumLoaded = true;
       });
 
-      // ✅ premium status GELDİKTEN sonra popup kontrol et (1 kez)
       if (!_premiumPopupChecked) {
         _premiumPopupChecked = true;
         if (!_isPremium) {
@@ -284,7 +380,6 @@ class _MainNavShellState extends State<MainNavShell>
   }
 
   Future<void> _showPremiumPopupIfNeeded() async {
-    // premium durumu daha gelmediyse asla popup açma
     if (!_premiumLoaded) return;
     if (_isPremium) return;
 
@@ -344,9 +439,7 @@ class _MainNavShellState extends State<MainNavShell>
                   const SizedBox(height: 12),
                   CheckboxListTile(
                     value: dontShowAgain,
-                    onChanged: (val) => setStateSB(
-                          () => dontShowAgain = val ?? false,
-                    ),
+                    onChanged: (val) => setStateSB(() => dontShowAgain = val ?? false),
                     contentPadding: EdgeInsets.zero,
                     dense: true,
                     controlAffinity: ListTileControlAffinity.leading,
@@ -409,8 +502,7 @@ class _MainNavShellState extends State<MainNavShell>
     if (cached != null) return cached;
 
     try {
-      final doc =
-      await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final doc = await FirebaseFirestore.instance.collection('users').doc(uid).get();
 
       String displayName = uid;
       if (doc.exists) {
@@ -515,6 +607,12 @@ class _MainNavShellState extends State<MainNavShell>
           displayName,
           lastMessage,
           context: context,
+          type: 'message',
+          data: {
+            'chatId': chatId,
+            'peerId': senderId,
+            'peerName': displayName,
+          },
         );
       }
     }, onError: (e) {
@@ -556,6 +654,8 @@ class _MainNavShellState extends State<MainNavShell>
           'Yeni bağlantı isteği',
           '$displayName sana bağlantı isteği gönderdi.',
           context: context,
+          type: 'follow',
+          data: {'userId': fromId},
         );
       }
     }, onError: (e) {
@@ -609,12 +709,11 @@ class _MainNavShellState extends State<MainNavShell>
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
 
-    final bg =
-    theme.colorScheme.surfaceVariant.withOpacity(isDark ? 0.18 : 0.75);
+    final bg = theme.colorScheme.surfaceVariant.withOpacity(isDark ? 0.18 : 0.75);
     final border =
     theme.colorScheme.outlineVariant.withOpacity(isDark ? 0.30 : 0.55);
-    final hint = theme.colorScheme.onSurfaceVariant
-        .withOpacity(isDark ? 0.55 : 0.65);
+    final hint =
+    theme.colorScheme.onSurfaceVariant.withOpacity(isDark ? 0.55 : 0.65);
 
     return Material(
       color: Colors.transparent,
@@ -675,21 +774,29 @@ class _MainNavShellState extends State<MainNavShell>
   }
 
   PreferredSizeWidget? _buildAppBar(BuildContext context) {
-    final theme = Theme.of(context);
+    // ✅ Home kendi header'ını çiziyor → AppBar KAPALI
+    if (_index == 0) return null;
 
-    // AddPost tab: appbar yok
     if (_index == 2) return null;
 
-    // Notifications / Profile: düz appbar
     if (_index == 3 || _index == 4) {
-      return AppBar(automaticallyImplyLeading: false);
+      return AppBar(
+        automaticallyImplyLeading: false,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
+      );
     }
 
-    // Jobs: search bubble + gps
     if (_index == 1) {
       return AppBar(
         automaticallyImplyLeading: false,
         titleSpacing: 0,
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        surfaceTintColor: Colors.transparent,
         title: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12),
           child: _buildSearchBubble(
@@ -713,11 +820,14 @@ class _MainNavShellState extends State<MainNavShell>
       );
     }
 
-    // Home: logo + search + chat
     return AppBar(
       automaticallyImplyLeading: false,
       titleSpacing: 0,
       leadingWidth: 64,
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      surfaceTintColor: Colors.transparent,
       leading: Padding(
         padding: const EdgeInsets.only(left: 12),
         child: Center(
@@ -737,14 +847,14 @@ class _MainNavShellState extends State<MainNavShell>
           padding: const EdgeInsets.only(right: 8),
           child: IconButton(
             icon: Image.asset(
-              'assets/icons/chat_arrow.png',
+              'assets/icons/send_light.png',
               width: 32,
               height: 32,
             ),
             tooltip: 'Sohbetler',
             onPressed: () {
               Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const ChatListScreen()),
+                MaterialPageRoute(builder: (_) => ChatListScreen(callService: _callService)),
               );
             },
           ),
@@ -898,6 +1008,7 @@ class _MainNavShellState extends State<MainNavShell>
     }
 
     return Scaffold(
+      extendBodyBehindAppBar: true,
       appBar: _buildAppBar(context),
       body: NotificationListener<UserScrollNotification>(
         onNotification: (notification) {
@@ -917,9 +1028,7 @@ class _MainNavShellState extends State<MainNavShell>
         },
         child: Stack(
           children: [
-            SafeArea(
-              child: IndexedStack(index: _index, children: _pages),
-            ),
+            IndexedStack(index: _index, children: _pages),
             Positioned(
               left: 16,
               right: 16,

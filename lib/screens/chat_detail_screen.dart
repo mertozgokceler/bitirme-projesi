@@ -75,7 +75,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   int _selectedBackgroundIndex = 0;
 
-  // ✅ Bariz fark eden presetler (dark modda net değişsin diye “uçurum” yaptım)
+  // ✅ Presetler (dark modda net fark)
   final List<ChatBgPreset> _bgPresets = const [
     ChatBgPreset(
       light: [Color(0xFFF4EFEF), Color(0xFFFFFFFF)],
@@ -108,7 +108,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _messageController.addListener(() {
       final isNotEmpty = _messageController.text.trim().isNotEmpty;
       if (_isComposing != isNotEmpty) {
-        setState(() => _isComposing = isNotEmpty);
+        if (mounted) setState(() => _isComposing = isNotEmpty);
       }
     });
   }
@@ -117,6 +117,47 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final i = _selectedBackgroundIndex.clamp(0, _bgPresets.length - 1);
     return _bgPresets[i];
   }
+
+  Future<void> _writeMessageBatch({
+    required Map<String, dynamic> messageData,
+    required String lastMessagePreview,
+    required String lastMessageType,
+  }) async {
+    final currentUser = _auth.currentUser;
+    final otherUserId = widget.otherUser['uid'] as String?;
+    if (currentUser == null || otherUserId == null) return;
+
+    final chatRef = _firestore.collection('chats').doc(widget.chatId);
+    final msgRef = chatRef.collection('messages').doc();
+    final batch = _firestore.batch();
+    final ts = FieldValue.serverTimestamp();
+
+    batch.set(msgRef, {
+      ...messageData,
+      'senderId': currentUser.uid,
+      'timestamp': ts,
+      'isRead': false,
+    });
+
+    batch.set(
+      chatRef,
+      {
+        'users': [currentUser.uid, otherUserId],
+        'hasMessages': true,
+        'lastMessage': lastMessagePreview,
+        'lastMessageType': lastMessageType,
+        'lastMessageSenderId': currentUser.uid,
+        'lastMessageTimestamp': ts,
+
+        // ✅ sadece ilk oluşturulduğunda yazılsın, ama merge olduğundan chat varsa bozmaz
+        'createdAt': FieldValue.serverTimestamp(),
+      },
+      SetOptions(merge: true),
+    );
+
+    await batch.commit();
+  }
+
 
   Future<void> _loadBg() async {
     try {
@@ -148,12 +189,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     }
     try {
       final doc = await _firestore.collection('users').doc(user.uid).get();
-      if (mounted) {
-        setState(() {
-          _currentUserData = doc.data();
-          _isLoadingUserData = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        _currentUserData = doc.data();
+        _isLoadingUserData = false;
+      });
     } catch (e) {
       debugPrint("Kullanıcı verisi yüklenirken hata: $e");
       if (mounted) setState(() => _isLoadingUserData = false);
@@ -167,9 +207,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _recordingTimer?.cancel();
     _audioPlayer.dispose();
 
-    // ✅ call cleanup
     _callController = null;
-
     super.dispose();
   }
 
@@ -301,28 +339,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
 
-    final currentUser = _auth.currentUser;
-    final otherUserId = widget.otherUser['uid'] as String?;
-    if (currentUser == null || otherUserId == null) return;
-
-    final timestamp = FieldValue.serverTimestamp();
-    final chatRef = _firestore.collection('chats').doc(widget.chatId);
-
-    await chatRef.collection('messages').add({
-      'type': 'text',
-      'text': text,
-      'senderId': currentUser.uid,
-      'timestamp': timestamp,
-      'isRead': false,
-    });
-
-    await chatRef.set({
-      'users': [currentUser.uid, otherUserId],
-      'lastMessage': text,
-      'lastMessageSenderId': currentUser.uid,
-      'lastMessageTimestamp': timestamp,
-      'isArchived': false,
-    }, SetOptions(merge: true));
+    await _writeMessageBatch(
+      messageData: {
+        'type': 'text',
+        'text': text,
+      },
+      lastMessagePreview: text,
+      lastMessageType: 'text',
+    );
 
     _messageController.clear();
   }
@@ -340,8 +364,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     try {
       final tempDir = await getTemporaryDirectory();
-      _recordingPath =
-      '${tempDir.path}/audio_message_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      _recordingPath = '${tempDir.path}/audio_message_${DateTime.now().millisecondsSinceEpoch}.m4a';
 
       await _audioRecorder.start(
         const RecordConfig(encoder: AudioEncoder.aacLc),
@@ -386,29 +409,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       final snapshot = await ref.putFile(file).whenComplete(() {});
       final url = await snapshot.ref.getDownloadURL();
 
-      final currentUser = _auth.currentUser;
-      final otherUserId = widget.otherUser['uid'] as String?;
-      if (currentUser == null || otherUserId == null) return;
-
-      final timestamp = FieldValue.serverTimestamp();
-      final chatRef = _firestore.collection('chats').doc(widget.chatId);
-
-      await chatRef.collection('messages').add({
-        'type': 'audio',
-        'audioUrl': url,
-        'duration': _recordDuration,
-        'senderId': currentUser.uid,
-        'timestamp': timestamp,
-        'isRead': false,
-      });
-
-      await chatRef.set({
-        'users': [currentUser.uid, otherUserId],
-        'lastMessage': 'Sesli Mesaj',
-        'lastMessageSenderId': currentUser.uid,
-        'lastMessageTimestamp': timestamp,
-        'isArchived': false,
-      }, SetOptions(merge: true));
+      await _writeMessageBatch(
+        messageData: {
+          'type': 'audio',
+          'audioUrl': url,
+          'duration': _recordDuration,
+        },
+        lastMessagePreview: 'Sesli mesaj',
+        lastMessageType: 'audio',
+      );
     } catch (e) {
       debugPrint("Sesli mesaj gönderilemedi: $e");
       _snack('Sesli mesaj gönderilemedi.', isError: true);
@@ -451,29 +460,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   padding: const EdgeInsets.only(bottom: 12.0),
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(12),
-                    child: Image.file(file,
-                        width: 180, height: 180, fit: BoxFit.cover),
+                    child: Image.file(file, width: 180, height: 180, fit: BoxFit.cover),
                   ),
                 ),
-              Text(subtitle,
-                  style: const TextStyle(fontWeight: FontWeight.w600)),
+              Text(subtitle, style: const TextStyle(fontWeight: FontWeight.w600)),
               if (size != null) ...[
                 const SizedBox(height: 8),
-                Text(_formatFileSize(size),
-                    style: TextStyle(color: ui.mutedText)),
+                Text(_formatFileSize(size), style: TextStyle(color: ui.mutedText)),
               ],
               const SizedBox(height: 10),
-              Text('Bu dosyayı göndermek istiyor musun?',
-                  style: TextStyle(color: ui.mutedText)),
+              Text('Bu dosyayı göndermek istiyor musun?', style: TextStyle(color: ui.mutedText)),
             ],
           ),
           actions: [
-            TextButton(
-                onPressed: () => Navigator.of(ctx).pop(false),
-                child: const Text('İptal')),
-            FilledButton(
-                onPressed: () => Navigator.of(ctx).pop(true),
-                child: const Text('Gönder')),
+            TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('İptal')),
+            FilledButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Gönder')),
           ],
         );
       },
@@ -491,10 +492,30 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         allowMultiple: false,
         type: FileType.custom,
         allowedExtensions: [
-          'jpg', 'jpeg', 'png', 'heic', 'webp',
-          'mp4', 'mov', 'mkv',
-          'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'zip', 'rar', '7z', 'txt', 'rtf',
-          'mp3', 'wav', 'aac', 'm4a',
+          'jpg',
+          'jpeg',
+          'png',
+          'heic',
+          'webp',
+          'mp4',
+          'mov',
+          'mkv',
+          'pdf',
+          'doc',
+          'docx',
+          'xls',
+          'xlsx',
+          'ppt',
+          'pptx',
+          'zip',
+          'rar',
+          '7z',
+          'txt',
+          'rtf',
+          'mp3',
+          'wav',
+          'aac',
+          'm4a',
         ],
       );
       if (result == null || result.files.isEmpty) return;
@@ -626,8 +647,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
     try {
       if (choice == 'photo') {
-        final picked = await _imagePicker.pickImage(
-            source: ImageSource.camera, imageQuality: 85);
+        final picked = await _imagePicker.pickImage(source: ImageSource.camera, imageQuality: 85);
         if (picked == null) return;
 
         final file = File(picked.path);
@@ -686,23 +706,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final otherUserId = widget.otherUser['uid'] as String?;
     if (currentUser == null || otherUserId == null) return;
 
-    final chatRef = _firestore.collection('chats').doc(widget.chatId);
-
     try {
-      final fileName =
-          '${DateTime.now().millisecondsSinceEpoch}_${originalName ?? 'media'}';
+      final fileName = '${DateTime.now().millisecondsSinceEpoch}_${originalName ?? 'media'}';
       final ref = _storage.ref().child('$folder/${widget.chatId}/$fileName');
 
       final snapshot = await ref.putFile(file).whenComplete(() {});
       final url = await snapshot.ref.getDownloadURL();
 
-      final timestamp = FieldValue.serverTimestamp();
-
       final data = <String, dynamic>{
         'type': messageType,
-        'senderId': currentUser.uid,
-        'timestamp': timestamp,
-        'isRead': false,
       };
 
       if (messageType == 'image') {
@@ -715,15 +727,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         if (size != null) data['fileSize'] = size;
       }
 
-      await chatRef.collection('messages').add(data);
-
-      await chatRef.set({
-        'users': [currentUser.uid, otherUserId],
-        'lastMessage': lastMessagePreview,
-        'lastMessageSenderId': currentUser.uid,
-        'lastMessageTimestamp': timestamp,
-        'isArchived': false,
-      }, SetOptions(merge: true));
+      await _writeMessageBatch(
+        messageData: data,
+        lastMessagePreview: lastMessagePreview,
+        lastMessageType: messageType,
+      );
     } catch (e) {
       debugPrint('Medya upload/gönderme hatası: $e');
       _snack('Medya gönderilemedi.', isError: true);
@@ -734,8 +742,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   // Mesaj Silme
   // -------------------------------------------------
 
-  void _showMessageOptions(
-      String messageId, Map<String, dynamic> messageData, bool isMe) {
+  void _showMessageOptions(String messageId, Map<String, dynamic> messageData, bool isMe) {
     final currentUserId = _auth.currentUser?.uid;
     if (currentUserId == null) return;
 
@@ -760,26 +767,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               if (isMe) ...[
                 const Divider(height: 0),
                 ListTile(
-                  leading: const Icon(Icons.delete_forever_rounded,
-                      color: Colors.redAccent),
-                  title: const Text('Herkesten sil',
-                      style: TextStyle(color: Colors.redAccent)),
+                  leading: const Icon(Icons.delete_forever_rounded, color: Colors.redAccent),
+                  title: const Text('Herkesten Sil', style: TextStyle(color: Colors.redAccent)),
                   onTap: () async {
                     Navigator.of(ctx).pop();
                     final confirm = await showDialog<bool>(
                       context: context,
                       builder: (dctx) => AlertDialog(
                         title: const Text('Herkesten silinsin mi?'),
-                        content: const Text(
-                            'Bu mesaj iki taraftan da silinecek. Emin misin?'),
+                        content: const Text('Bu mesaj iki taraftan da silinecek. Emin misin?'),
                         actions: [
-                          TextButton(
-                              onPressed: () => Navigator.of(dctx).pop(false),
-                              child: const Text('Vazgeç')),
+                          TextButton(onPressed: () => Navigator.of(dctx).pop(false), child: const Text('Vazgeç')),
                           TextButton(
                             onPressed: () => Navigator.of(dctx).pop(true),
-                            child: const Text('Sil',
-                                style: TextStyle(color: Colors.redAccent)),
+                            child: const Text('Sil', style: TextStyle(color: Colors.redAccent)),
                           ),
                         ],
                       ),
@@ -803,13 +804,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (uid == null) return;
 
     try {
-      final msgRef = _firestore
-          .collection('chats')
-          .doc(widget.chatId)
-          .collection('messages')
-          .doc(messageId);
-      await msgRef.set({'deletedFor': FieldValue.arrayUnion([uid])},
-          SetOptions(merge: true));
+      final msgRef = _firestore.collection('chats').doc(widget.chatId).collection('messages').doc(messageId);
+      await msgRef.set({'deletedFor': FieldValue.arrayUnion([uid])}, SetOptions(merge: true));
     } catch (e) {
       debugPrint("Benden sil hatası: $e");
       _snack('Mesaj senden silinemedi.', isError: true);
@@ -821,11 +817,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (uid == null) return;
 
     try {
-      final msgRef = _firestore
-          .collection('chats')
-          .doc(widget.chatId)
-          .collection('messages')
-          .doc(messageId);
+      final msgRef = _firestore.collection('chats').doc(widget.chatId).collection('messages').doc(messageId);
       final snap = await msgRef.get();
       final data = snap.data() as Map<String, dynamic>?;
       if (data == null || data['senderId'] != uid) {
@@ -895,9 +887,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           ),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: isSelected
-                                ? Theme.of(rootContext).colorScheme.primary
-                                : Colors.grey.shade400,
+                            color: isSelected ? Theme.of(rootContext).colorScheme.primary : Colors.grey.shade400,
                             width: isSelected ? 3 : 1,
                           ),
                         ),
@@ -938,9 +928,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       );
     }
 
-    final otherName =
-    (widget.otherUser['name'] ?? widget.otherUser['username'] ?? 'Sohbet')
-        .toString();
+    final otherName = (widget.otherUser['name'] ?? widget.otherUser['username'] ?? 'Sohbet').toString();
     final otherPhotoUrl = (widget.otherUser['photoUrl'] as String?) ?? '';
 
     final preset = _preset;
@@ -960,23 +948,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             children: [
               CircleAvatar(
                 radius: 18,
-                backgroundImage:
-                otherPhotoUrl.isNotEmpty ? NetworkImage(otherPhotoUrl) : null,
-                child: otherPhotoUrl.isEmpty
-                    ? Icon(Icons.person, color: ui.onAvatar)
-                    : null,
+                backgroundImage: otherPhotoUrl.isNotEmpty ? NetworkImage(otherPhotoUrl) : null,
+                child: otherPhotoUrl.isEmpty ? Icon(Icons.person, color: ui.onAvatar) : null,
               ),
               const SizedBox(width: 12),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(otherName,
-                      style: t.textTheme.titleSmall
-                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  Text(
+                    otherName,
+                    style: t.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+                  ),
                   const SizedBox(height: 2),
-                  Text('çevrimiçi',
-                      style: t.textTheme.labelSmall
-                          ?.copyWith(color: ui.mutedText)),
+                  Text(
+                    'çevrimiçi',
+                    style: t.textTheme.labelSmall?.copyWith(color: ui.mutedText),
+                  ),
                 ],
               ),
             ],
@@ -989,18 +976,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   : () async {
                 final otherUserId = widget.otherUser['uid'] as String?;
                 if (otherUserId == null) return;
-
                 if (_callController != null) return;
 
-                // 🎯 Kamera + Mikrofon izni
                 final mic = await Permission.microphone.request();
                 final cam = await Permission.camera.request();
-
                 if (!mic.isGranted || !cam.isGranted) {
-                  _snack(
-                    'Görüntülü arama için kamera ve mikrofon izni gerekli.',
-                    isError: true,
-                  );
+                  _snack('Görüntülü arama için kamera ve mikrofon izni gerekli.', isError: true);
                   return;
                 }
 
@@ -1010,12 +991,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   final controller = CallController(widget.callService);
                   _callController = controller;
 
-                  final meName = (_currentUserData?['name'] ??
-                      _currentUserData?['username'] ??
-                      'User')
-                      .toString();
-
-                  final calleeName = (otherName).toString();
+                  final meName =
+                  (_currentUserData?['name'] ?? _currentUserData?['username'] ?? 'User').toString();
+                  final calleeName = otherName.toString();
 
                   await controller.startOutgoing(
                     calleeId: otherUserId,
@@ -1035,10 +1013,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       builder: (_) => CallScreen(controller: controller),
                     ),
                   );
+
                   await controller.disposeAll(writeEnded: true);
                   _callController = null;
-
-                } catch (e) {
+                } catch (_) {
                   _snack('Görüntülü arama başlatılamadı.', isError: true);
                   try {
                     await _callController?.disposeAll(writeEnded: false);
@@ -1049,21 +1027,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 }
               },
             ),
-
             IconButton(
               icon: _startingCall
-                  ? const SizedBox(
-                width: 18,
-                height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.call),
               onPressed: _startingCall
                   ? null
                   : () async {
                 final otherUserId = widget.otherUser['uid'] as String?;
                 if (otherUserId == null) return;
-
                 if (_callController != null) return;
 
                 final mic = await Permission.microphone.request();
@@ -1078,14 +1050,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   final controller = CallController(widget.callService);
                   _callController = controller;
 
-                  // ✅ BENİM İSMİM (myName yoktu, hata buradan geliyordu)
-                  final meName = (_currentUserData?['name'] ??
-                      _currentUserData?['username'] ??
-                      'User')
-                      .toString();
-
-                  // ✅ karşı tarafın adı (sende zaten var diye kullanıyorum)
-                  final calleeName = (otherName).toString();
+                  final meName =
+                  (_currentUserData?['name'] ?? _currentUserData?['username'] ?? 'User').toString();
+                  final calleeName = otherName.toString();
 
                   await controller.startOutgoing(
                     calleeId: otherUserId,
@@ -1105,10 +1072,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       builder: (_) => CallScreen(controller: controller),
                     ),
                   );
+
                   await controller.disposeAll(writeEnded: true);
                   _callController = null;
-
-                } catch (e) {
+                } catch (_) {
                   _snack('Arama başlatılamadı.', isError: true);
                   try {
                     await _callController?.disposeAll(writeEnded: false);
@@ -1118,7 +1085,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   if (mounted) setState(() => _startingCall = false);
                 }
               },
-
             ),
             PopupMenuButton<String>(
               onSelected: (v) {
@@ -1132,7 +1098,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         ),
         body: Container(
           decoration: BoxDecoration(
-            // ✅ opacity yok. Dark modda net fark olsun.
             gradient: LinearGradient(
               colors: bgColors,
               begin: Alignment.topCenter,
@@ -1153,18 +1118,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         .orderBy('timestamp', descending: true)
                         .snapshots(),
                     builder: (context, snapshot) {
-                      if (snapshot.connectionState ==
-                          ConnectionState.waiting) {
-                        return const Center(
-                            child: CircularProgressIndicator());
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
                       }
                       if (snapshot.hasError) {
-                        return Center(
-                            child: Text(
-                                'Mesajlar yüklenirken hata: ${snapshot.error}'));
+                        return Center(child: Text('Mesajlar yüklenirken hata: ${snapshot.error}'));
                       }
-                      if (!snapshot.hasData ||
-                          snapshot.data!.docs.isEmpty) {
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                         return const Center(child: Text('Henüz mesaj yok.'));
                       }
 
@@ -1177,11 +1137,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         itemCount: docs.length,
                         itemBuilder: (context, index) {
                           final doc = docs[index];
-                          final data =
-                              doc.data() as Map<String, dynamic>? ?? {};
+                          final data = doc.data() as Map<String, dynamic>? ?? {};
 
-                          final deletedFor =
-                              (data['deletedFor'] as List?) ?? const [];
+                          final deletedFor = (data['deletedFor'] as List?) ?? const [];
                           if (deletedFor.contains(currentUserId)) {
                             return const SizedBox.shrink();
                           }
@@ -1190,39 +1148,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           final ts = data['timestamp'] as Timestamp?;
                           final isRead = data['isRead'] as bool? ?? false;
 
-                          final myPhotoUrl =
-                              (_currentUserData?['photoUrl'] as String?) ??
-                                  '';
-                          final avatarUrl =
-                          isMe ? myPhotoUrl : otherPhotoUrl;
+                          final myPhotoUrl = (_currentUserData?['photoUrl'] as String?) ?? '';
+                          final avatarUrl = isMe ? myPhotoUrl : otherPhotoUrl;
 
-                          final type =
-                          (data['type'] as String? ?? 'text').toLowerCase();
+                          final type = (data['type'] as String? ?? 'text').toLowerCase();
 
                           final Widget content = switch (type) {
-                            'audio' => _buildAudioBubble(
-                                context, data, isMe, ts, isRead),
-                            'image' => _buildImageBubble(
-                                context, data, isMe, ts, isRead),
-                            'video' => _buildVideoBubble(
-                                context, data, isMe, ts, isRead),
-                            'pdf' ||
-                            'word' ||
-                            'excel' ||
-                            'powerpoint' ||
-                            'archive' ||
-                            'file' =>
-                                _buildFileBubble(
-                                    context, data, isMe, ts, isRead),
-                            _ => _buildTextBubble(context,
-                                (data['text'] as String? ?? ''), isMe, ts, isRead),
+                            'audio' => _buildAudioBubble(context, data, isMe, ts, isRead),
+                            'image' => _buildImageBubble(context, data, isMe, ts, isRead),
+                            'video' => _buildVideoBubble(context, data, isMe, ts, isRead),
+                            'pdf' || 'word' || 'excel' || 'powerpoint' || 'archive' || 'file' =>
+                                _buildFileBubble(context, data, isMe, ts, isRead),
+                            _ => _buildTextBubble(context, (data['text'] as String? ?? ''), isMe, ts, isRead),
                           };
 
                           return GestureDetector(
-                            onLongPress: () =>
-                                _showMessageOptions(doc.id, data, isMe),
-                            child: _buildMessageRow(
-                                content, isMe, avatarUrl),
+                            onLongPress: () => _showMessageOptions(doc.id, data, isMe),
+                            child: _buildMessageRow(content, isMe, avatarUrl),
                           );
                         },
                       );
@@ -1248,18 +1190,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
-        mainAxisAlignment:
-        isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           if (!isMe) ...[
             CircleAvatar(
               radius: 16,
-              backgroundImage:
-              avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
-              child: avatarUrl.isEmpty
-                  ? const Icon(Icons.person, size: 18)
-                  : null,
+              backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+              child: avatarUrl.isEmpty ? const Icon(Icons.person, size: 18) : null,
             ),
             const SizedBox(width: 8),
           ],
@@ -1268,11 +1206,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             const SizedBox(width: 8),
             CircleAvatar(
               radius: 16,
-              backgroundImage:
-              avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
-              child: avatarUrl.isEmpty
-                  ? Icon(Icons.person, size: 18, color: ui.onAvatar)
-                  : null,
+              backgroundImage: avatarUrl.isNotEmpty ? NetworkImage(avatarUrl) : null,
+              child: avatarUrl.isEmpty ? Icon(Icons.person, size: 18, color: ui.onAvatar) : null,
             ),
           ],
         ],
@@ -1287,12 +1222,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(_formatTimestamp(timestamp),
-              style: TextStyle(fontSize: 12, color: ui.metaText)),
+          Text(_formatTimestamp(timestamp), style: TextStyle(fontSize: 12, color: ui.metaText)),
           if (isMe) ...[
             const SizedBox(width: 4),
-            Icon(Icons.done_all,
-                size: 16, color: isRead ? ui.readTick : ui.metaText),
+            Icon(Icons.done_all, size: 16, color: isRead ? ui.readTick : ui.metaText),
           ],
         ],
       ),
@@ -1306,35 +1239,36 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final ui = ChatUI.of(Theme.of(context));
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    // ✅ Dark modda “daha görünür” olsun diye hafif preset tint
     final preset = _preset;
     final accent = (isDark ? preset.dark.last : preset.light.first);
 
     final Color bubbleColor = isMe
         ? Color.alphaBlend(accent.withOpacity(isDark ? 0.18 : 0.10), ui.meBubble)
-        : Color.alphaBlend(
-        accent.withOpacity(isDark ? 0.12 : 0.06), ui.otherBubble);
+        : Color.alphaBlend(accent.withOpacity(isDark ? 0.12 : 0.06), ui.otherBubble);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
-      decoration: BoxDecoration(
-        color: bubbleColor,
-        borderRadius: BorderRadius.only(
-          topLeft: const Radius.circular(16),
-          topRight: const Radius.circular(16),
-          bottomLeft: isMe ? const Radius.circular(16) : Radius.zero,
-          bottomRight: isMe ? Radius.zero : const Radius.circular(16),
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 320),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+        decoration: BoxDecoration(
+          color: bubbleColor,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(16),
+            topRight: const Radius.circular(16),
+            bottomLeft: isMe ? const Radius.circular(16) : Radius.zero,
+            bottomRight: isMe ? Radius.zero : const Radius.circular(16),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(ui.shadowOpacity),
+              blurRadius: 6,
+              offset: const Offset(0, 2),
+            )
+          ],
+          border: Border.all(color: ui.bubbleBorder),
         ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(ui.shadowOpacity),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          )
-        ],
-        border: Border.all(color: ui.bubbleBorder),
+        child: child,
       ),
-      child: child,
     );
   }
 
@@ -1347,13 +1281,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ) {
     final ui = ChatUI.of(Theme.of(context));
     return Column(
-      crossAxisAlignment:
-      isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         _buildBubbleContainer(
           isMe: isMe,
-          child: Text(text,
-              style: TextStyle(color: isMe ? ui.meText : ui.otherText)),
+          child: Text(
+            text,
+            style: TextStyle(color: isMe ? ui.meText : ui.otherText),
+          ),
         ),
         const SizedBox(height: 4),
         _buildMetaRow(isMe, timestamp, isRead),
@@ -1370,13 +1305,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       ) {
     final url = data['imageUrl'] as String?;
     if (url == null || url.isEmpty) {
-      return _buildTextBubble(
-          context, '[Görsel bulunamadı]', isMe, timestamp, isRead);
+      return _buildTextBubble(context, '[Görsel bulunamadı]', isMe, timestamp, isRead);
     }
 
     return Column(
-      crossAxisAlignment:
-      isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         GestureDetector(
           onTap: () => _showImagePreview(url),
@@ -1417,36 +1350,35 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final ui = ChatUI.of(Theme.of(context));
     final url = data['videoUrl'] as String?;
     if (url == null || url.isEmpty) {
-      return _buildTextBubble(
-          context, '[Video bulunamadı]', isMe, timestamp, isRead);
+      return _buildTextBubble(context, '[Video bulunamadı]', isMe, timestamp, isRead);
     }
 
     return Column(
-      crossAxisAlignment:
-      isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         GestureDetector(
           onTap: () => _openUrlExternal(url),
           child: _buildBubbleContainer(
             isMe: isMe,
             child: Row(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisSize: MainAxisSize.max,
               children: [
                 Icon(Icons.videocam, color: isMe ? ui.meText : ui.otherText),
                 const SizedBox(width: 10),
-                Expanded(
+                Flexible(
+                  fit: FlexFit.loose,
                   child: Text(
                     'Video',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        color: isMe ? ui.meText : ui.otherText,
-                        fontWeight: FontWeight.w600),
+                      color: isMe ? ui.meText : ui.otherText,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 8),
-                Icon(Icons.play_circle_fill,
-                    color: isMe ? ui.meText : ui.otherText),
+                const SizedBox(width: 10),
+                Icon(Icons.play_circle_fill, color: isMe ? ui.meText : ui.otherText),
               ],
             ),
           ),
@@ -1470,26 +1402,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final iconPath = _getFileIconAsset(fileName);
 
     return Column(
-      crossAxisAlignment:
-      isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         GestureDetector(
           onTap: fileUrl != null ? () => _openUrlExternal(fileUrl) : null,
           child: _buildBubbleContainer(
             isMe: isMe,
             child: Row(
-              mainAxisSize: MainAxisSize.min,
+              mainAxisSize: MainAxisSize.max,
               children: [
                 Image.asset(iconPath, width: 28, height: 28),
                 const SizedBox(width: 10),
-                Expanded(
+                Flexible(
+                  fit: FlexFit.loose,
                   child: Text(
                     fileName,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                        color: isMe ? ui.meText : ui.otherText,
-                        fontWeight: FontWeight.w600),
+                      color: isMe ? ui.meText : ui.otherText,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ],
@@ -1512,8 +1445,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final url = data['audioUrl'] as String?;
     final duration = data['duration'] as int? ?? 0;
     if (url == null || url.isEmpty) {
-      return _buildTextBubble(
-          context, '[Ses dosyası bulunamadı]', isMe, timestamp, isRead);
+      return _buildTextBubble(context, '[Ses dosyası bulunamadı]', isMe, timestamp, isRead);
     }
 
     final ui = ChatUI.of(Theme.of(context));
@@ -1569,18 +1501,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   Icon(Icons.mic, color: ui.recordRed),
                   Text(
                     _formatDuration(_recordDuration),
-                    style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: ui.inputText),
+                    style: TextStyle(fontWeight: FontWeight.w800, color: ui.inputText),
                   ),
-                  Text('Kaydediliyor...',
-                      style: TextStyle(color: ui.mutedText)),
+                  Text('Kaydediliyor...', style: TextStyle(color: ui.mutedText)),
                 ],
               )
                   : Row(
                 children: [
-                  Icon(Icons.emoji_emotions_outlined,
-                      color: ui.iconMuted, size: 24),
+                  Icon(Icons.emoji_emotions_outlined, color: ui.iconMuted, size: 24),
                   const SizedBox(width: 10),
                   Expanded(
                     child: TextField(
@@ -1595,8 +1523,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       ),
                       minLines: 1,
                       maxLines: 4,
-                      onSubmitted:
-                      _isComposing ? (_) => _sendMessage() : null,
+                      onSubmitted: _isComposing ? (_) => _sendMessage() : null,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -1607,8 +1534,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                   IconButton(
                     onPressed: _pickFromCamera,
-                    icon: Icon(Icons.camera_alt_outlined,
-                        color: ui.iconMuted),
+                    icon: Icon(Icons.camera_alt_outlined, color: ui.iconMuted),
                     visualDensity: VisualDensity.compact,
                   ),
                 ],
@@ -1618,8 +1544,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           const SizedBox(width: 8),
           GestureDetector(
             onLongPressStart: _isComposing ? null : (_) => _startRecording(),
-            onLongPressEnd:
-            _isComposing ? null : (_) => _stopRecordingAndSend(),
+            onLongPressEnd: _isComposing ? null : (_) => _stopRecordingAndSend(),
             onTap: _isComposing ? _sendMessage : null,
             child: Container(
               padding: const EdgeInsets.all(12),
@@ -1629,13 +1554,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               ),
               child: AnimatedSwitcher(
                 duration: const Duration(milliseconds: 200),
-                transitionBuilder: (child, anim) =>
-                    ScaleTransition(scale: anim, child: child),
+                transitionBuilder: (child, anim) => ScaleTransition(scale: anim, child: child),
                 child: _isComposing
-                    ? const Icon(Icons.send,
-                    key: ValueKey('send'),
-                    color: Colors.white,
-                    size: 22)
+                    ? const Icon(Icons.send, key: ValueKey('send'), color: Colors.white, size: 22)
                     : Icon(
                   _isRecording ? Icons.stop : Icons.mic,
                   key: const ValueKey('mic'),
@@ -1723,29 +1644,20 @@ class ChatUI {
 
     return ChatUI._(
       brand: brand,
-      appBarBg:
-      isDark ? cs.surface.withOpacity(0.92) : cs.surface.withOpacity(0.78),
+      appBarBg: isDark ? cs.surface.withOpacity(0.92) : cs.surface.withOpacity(0.78),
       overlayStyle: SystemUiOverlayStyle(
         statusBarColor: Colors.transparent,
         statusBarBrightness: isDark ? Brightness.dark : Brightness.light,
         statusBarIconBrightness: isDark ? Brightness.light : Brightness.dark,
       ),
       meBubble: isDark ? brand.withOpacity(0.30) : brand.withOpacity(0.22),
-      otherBubble: isDark
-          ? cs.surfaceVariant.withOpacity(0.88)
-          : Colors.white.withOpacity(0.92),
+      otherBubble: isDark ? cs.surfaceVariant.withOpacity(0.88) : Colors.white.withOpacity(0.92),
       meText: Colors.white,
-      otherText: t.textTheme.bodyLarge?.color ??
-          (isDark ? Colors.white : Colors.black87),
+      otherText: t.textTheme.bodyLarge?.color ?? (isDark ? Colors.white : Colors.black87),
       inputBg: isDark ? cs.surface.withOpacity(0.92) : Colors.white.withOpacity(0.95),
-      inputText: t.textTheme.bodyLarge?.color ??
-          (isDark ? Colors.white : Colors.black87),
-      hintText: (t.textTheme.bodyMedium?.color ??
-          (isDark ? Colors.white70 : Colors.black54))
-          .withOpacity(0.85),
-      iconMuted: (t.textTheme.bodyMedium?.color ??
-          (isDark ? Colors.white70 : Colors.black54))
-          .withOpacity(0.85),
+      inputText: t.textTheme.bodyLarge?.color ?? (isDark ? Colors.white : Colors.black87),
+      hintText: (t.textTheme.bodyMedium?.color ?? (isDark ? Colors.white70 : Colors.black54)).withOpacity(0.85),
+      iconMuted: (t.textTheme.bodyMedium?.color ?? (isDark ? Colors.white70 : Colors.black54)).withOpacity(0.85),
       border: isDark ? Colors.white12 : Colors.black12,
       bubbleBorder: isDark ? Colors.white10 : Colors.black12,
       shadowOpacity: isDark ? 0.20 : 0.06,
@@ -1844,8 +1756,7 @@ class _AudioMessageBubbleState extends State<_AudioMessageBubble> {
 
   Future<void> _toggle() async {
     try {
-      final isPlaying = (_playerState == PlayerState.playing) &&
-          (_playingUrl == widget.audioUrl);
+      final isPlaying = (_playerState == PlayerState.playing) && (_playingUrl == widget.audioUrl);
 
       if (isPlaying) {
         await widget.audioPlayer.pause();
@@ -1888,16 +1799,15 @@ class _AudioMessageBubbleState extends State<_AudioMessageBubble> {
 
   @override
   Widget build(BuildContext context) {
-    final bool isPlaying = (_playerState == PlayerState.playing) &&
-        (_playingUrl == widget.audioUrl);
+    final bool isPlaying = (_playerState == PlayerState.playing) && (_playingUrl == widget.audioUrl);
     final bubble = widget.isMe ? widget.meBubble : widget.otherBubble;
     final txt = widget.isMe ? widget.meText : widget.otherText;
 
     return Column(
-      crossAxisAlignment:
-      widget.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+      crossAxisAlignment: widget.isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
       children: [
         Container(
+          constraints: const BoxConstraints(maxWidth: 320),
           padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
           decoration: BoxDecoration(
             color: bubble,
@@ -1921,12 +1831,10 @@ class _AudioMessageBubbleState extends State<_AudioMessageBubble> {
             children: [
               IconButton(
                 onPressed: _toggle,
-                icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow,
-                    color: txt),
+                icon: Icon(isPlaying ? Icons.pause : Icons.play_arrow, color: txt),
                 visualDensity: VisualDensity.compact,
               ),
-              Text(_fmtDuration(widget.duration),
-                  style: TextStyle(color: txt.withOpacity(0.85))),
+              Text(_fmtDuration(widget.duration), style: TextStyle(color: txt.withOpacity(0.85))),
             ],
           ),
         ),
@@ -1936,13 +1844,10 @@ class _AudioMessageBubbleState extends State<_AudioMessageBubble> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(_fmtTs(widget.timestamp),
-                  style: TextStyle(fontSize: 12, color: widget.metaText)),
+              Text(_fmtTs(widget.timestamp), style: TextStyle(fontSize: 12, color: widget.metaText)),
               if (widget.isMe) ...[
                 const SizedBox(width: 4),
-                Icon(Icons.done_all,
-                    size: 16,
-                    color: widget.isRead ? widget.readTick : widget.metaText),
+                Icon(Icons.done_all, size: 16, color: widget.isRead ? widget.readTick : widget.metaText),
               ]
             ],
           ),

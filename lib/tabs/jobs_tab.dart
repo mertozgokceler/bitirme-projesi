@@ -1,9 +1,12 @@
 // lib/tabs/jobs_tab.dart
-import 'package:flutter/material.dart';
+import 'dart:ui';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/material.dart';
 
 import '../screens/job_apply_screen.dart';
 import '../theme/app_colors.dart';
+import '../widgets/job_details_sheet.dart';
 
 class JobsTab extends StatelessWidget {
   const JobsTab({super.key});
@@ -41,542 +44,184 @@ class JobsTab extends StatelessWidget {
         .get(const GetOptions(source: Source.server));
   }
 
-  void _openJobDetailsSheet(
-      BuildContext context,
-      String jobId,
-      Map<String, dynamic> job,
-      ) {
+  void _openJobDetailsSheet(BuildContext context, String jobId, Map<String, dynamic> job) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _JobDetailsSheet(jobId: jobId, job: job),
+      builder: (_) => JobDetailsSheet(jobId: jobId, job: job),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
 
-    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: FirebaseFirestore.instance
-          .collection('jobs')
-          .orderBy('createdAt', descending: true)
-          .snapshots(),
-      builder: (context, snapshot) {
-        if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
-        }
-
-        if (snapshot.hasError) {
-          return Center(
-            child: Text('İlanlar yüklenirken hata oluştu:\n${snapshot.error}'),
-          );
-        }
-
-        final docs = snapshot.data?.docs ?? [];
-        if (docs.isEmpty) {
-          return const Center(child: Text('Henüz yayınlanmış iş ilanı yok.'));
-        }
-
-        const spacing = 10.0;
-        const aspect = 0.88;
-
-        return RefreshIndicator(
-          onRefresh: _refresh,
-          edgeOffset: 12,
-          child: GridView.builder(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              crossAxisSpacing: spacing,
-              mainAxisSpacing: spacing,
-              childAspectRatio: aspect,
-            ),
-            itemCount: docs.length,
-            itemBuilder: (context, index) {
-              final doc = docs[index];
-              final data = doc.data();
-
-              final title = (data['title'] ?? '').toString().trim();
-              final companyName = (data['companyName'] ?? '').toString().trim();
-              final location = (data['location'] ?? '').toString().trim();
-              final workModel = (data['workModel'] ?? '').toString().trim();
-
-              final logoUrl =
-              (data['companyLogoUrl'] ?? '').toString().trim();
-              final companyId = (data['companyId'] ?? '').toString().trim();
-
-              final displayTitle = title.isEmpty ? '(Pozisyon adı yok)' : title;
-              final displayCompany = companyName.isEmpty
-                  ? 'Şirket adı belirtilmemiş'
-                  : companyName;
-              final displayLocation =
-              location.isEmpty ? 'Konum belirtilmemiş' : location;
-
-              // Logo: önce job içindeki companyLogoUrl, boşsa users/{id}.photoUrl
-              Widget logoWidget;
-              if (companyId.isEmpty) {
-                logoWidget = _CompanyLogoBox(
-                  logoUrl: logoUrl,
-                  fallbackText: displayCompany,
-                );
-              } else {
-                logoWidget =
-                    FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-                      future: FirebaseFirestore.instance
-                          .collection('users')
-                          .doc(companyId)
-                          .get(),
-                      builder: (context, snap) {
-                        String finalLogo = logoUrl;
-
-                        if (snap.hasData && snap.data!.exists) {
-                          final u = snap.data!.data()!;
-                          final userLogo =
-                          (u['photoUrl'] ?? '').toString().trim();
-                          if (finalLogo.isEmpty && userLogo.isNotEmpty) {
-                            finalLogo = userLogo;
-                          }
-                        }
-
-                        return _CompanyLogoBox(
-                          logoUrl: finalLogo,
-                          fallbackText: displayCompany,
-                        );
-                      },
-                    );
-              }
-
-              return _JobGridCard(
-                theme: theme,
-                title: displayTitle,
-                company: displayCompany,
-                location: displayLocation,
-                workModel: workModel,
-                logo: logoWidget,
-                onTap: () => _openJobDetailsSheet(context, doc.id, data),
-              );
-            },
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _JobDetailsSheet extends StatelessWidget {
-  final String jobId;
-  final Map<String, dynamic> job;
-
-  const _JobDetailsSheet({
-    required this.jobId,
-    required this.job,
-  });
-
-  Future<Map<String, dynamic>?> _loadCompany(String companyId) async {
-    if (companyId.isEmpty) return null;
-    final snap = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(companyId)
-        .get();
-    if (!snap.exists) return null;
-    return snap.data();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    // Temel alanlar
-    final title = (job['title'] ?? '(Pozisyon adı yok)').toString().trim();
-    final companyName =
-    (job['companyName'] ?? 'Şirket adı belirtilmemiş').toString().trim();
-    final location =
-    (job['location'] ?? 'Konum belirtilmemiş').toString().trim();
-    final description = (job['description'] ?? '').toString().trim();
-    final workModel = (job['workModel'] ?? '').toString().trim();
-
-    // opsiyonel alanlar
-    final level = (job['level'] ?? '').toString().trim();
-    final salary = (job['salary'] ?? '').toString().trim();
-    final employmentType = (job['employmentType'] ?? '').toString().trim();
-    final requirements = (job['requirements'] ?? '').toString().trim();
-    final benefits = (job['benefits'] ?? '').toString().trim();
-    final techStack = (job['techStack'] ?? '').toString().trim();
-    final experienceYears = (job['experienceYears'] ?? '').toString().trim();
-    final contactEmail = (job['contactEmail'] ?? '').toString().trim();
-    final applyUrl = (job['applyUrl'] ?? '').toString().trim();
-    final deadline = JobsTab._fmtDate(job['deadline']);
-    final createdAt = JobsTab._fmtDate(job['createdAt']);
-
-    final companyId = (job['companyId'] ?? '').toString().trim();
-    final logoUrl = (job['companyLogoUrl'] ?? '').toString().trim();
-
-    Widget infoRow(IconData icon, String text) {
-      return Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 18, color: AppColors.subtleText(theme)),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              text,
-              style: TextStyle(
-                fontSize: 13,
-                height: 1.35,
-                color: AppColors.subtleText(theme),
-              ),
-            ),
-          ),
+  // ---- Premium background helpers ----
+  LinearGradient _bgGradient(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    if (isDark) {
+      return const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Color(0xFF0B1220),
+          Color(0xFF0A1B2E),
+          Color(0xFF081829),
         ],
       );
     }
-
-    Widget sectionTitle(String t) {
-      return Text(
-        t,
-        style: TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w900,
-          color: theme.colorScheme.onSurface,
-        ),
-      );
-    }
-
-    Widget sectionBody(String t) {
-      return Text(
-        t,
-        style: TextStyle(
-          fontSize: 13,
-          height: 1.45,
-          color: theme.colorScheme.onSurface,
-        ),
-      );
-    }
-
-    Widget dividerBlock() => const Padding(
-      padding: EdgeInsets.symmetric(vertical: 14),
-      child: Divider(height: 1),
+    return const LinearGradient(
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+      colors: [
+        Color(0xFFF6FAFF),
+        Color(0xFFEFF6FF),
+        Color(0xFFF9FBFF),
+      ],
     );
+  }
 
-    return DraggableScrollableSheet(
-      initialChildSize: 0.92,
-      minChildSize: 0.55,
-      maxChildSize: 1.00,
-      expand: false,
-      builder: (context, scrollController) {
-        return Container(
-          decoration: BoxDecoration(
-            color: theme.colorScheme.surface,
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Stack(
-              children: [
-                // CONTENT
-                ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                  children: [
-                    const SizedBox(height: 10),
-                    Center(
-                      child: Container(
-                        width: 44,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: AppColors.sheetHandle(theme),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 14),
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
 
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        height: 1.15,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      companyName,
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.subtleText(theme),
-                      ),
-                    ),
-                    const SizedBox(height: 10),
+    return Stack(
+      children: [
+        // Background
+        Container(decoration: BoxDecoration(gradient: _bgGradient(context))),
+        Positioned(
+          top: -120,
+          left: -80,
+          child: _GlowBlob(size: 260, color: cs.primary.withOpacity(0.20)),
+        ),
+        Positioned(
+          bottom: -140,
+          right: -90,
+          child: _GlowBlob(size: 280, color: cs.tertiary.withOpacity(0.18)),
+        ),
 
-                    infoRow(
-                      Icons.location_on_outlined,
-                      '$location • ${JobsTab.prettyWorkType(workModel)}',
-                    ),
+        // ✅ FIX: İçeriği SafeArea içine al
+        SafeArea(
+          top: true,
+          bottom: false,
+          child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirebaseFirestore.instance
+                .collection('jobs')
+                .orderBy('createdAt', descending: true)
+                .snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-                    const SizedBox(height: 10),
-
-                    if (employmentType.isNotEmpty)
-                      infoRow(Icons.badge_outlined, 'Çalışma tipi: $employmentType'),
-                    if (level.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      infoRow(Icons.trending_up, 'Seviye: $level'),
-                    ],
-                    if (salary.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      infoRow(Icons.payments_outlined, 'Maaş: $salary'),
-                    ],
-                    if (experienceYears.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      infoRow(Icons.timelapse_outlined, 'Deneyim: $experienceYears'),
-                    ],
-                    if (createdAt.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      infoRow(Icons.calendar_today_outlined, 'Yayın tarihi: $createdAt'),
-                    ],
-                    if (deadline.isNotEmpty) ...[
-                      const SizedBox(height: 6),
-                      infoRow(Icons.event_busy_outlined, 'Son başvuru: $deadline'),
-                    ],
-
-                    dividerBlock(),
-
-                    sectionTitle('İlan Açıklaması'),
-                    const SizedBox(height: 8),
-                    sectionBody(description.isEmpty ? 'Açıklama eklenmemiş.' : description),
-
-                    if (requirements.isNotEmpty) ...[
-                      dividerBlock(),
-                      sectionTitle('Aranan Nitelikler'),
-                      const SizedBox(height: 8),
-                      sectionBody(requirements),
-                    ],
-
-                    if (techStack.isNotEmpty) ...[
-                      dividerBlock(),
-                      sectionTitle('Teknolojiler'),
-                      const SizedBox(height: 8),
-                      sectionBody(techStack),
-                    ],
-
-                    if (benefits.isNotEmpty) ...[
-                      dividerBlock(),
-                      sectionTitle('Yan Haklar / Avantajlar'),
-                      const SizedBox(height: 8),
-                      sectionBody(benefits),
-                    ],
-
-                    if (contactEmail.isNotEmpty || applyUrl.isNotEmpty) ...[
-                      dividerBlock(),
-                      sectionTitle('Başvuru / İletişim'),
-                      const SizedBox(height: 8),
-                      if (contactEmail.isNotEmpty)
-                        infoRow(Icons.mail_outline, contactEmail),
-                      if (applyUrl.isNotEmpty) ...[
-                        const SizedBox(height: 6),
-                        infoRow(Icons.link_outlined, applyUrl),
-                      ],
-                    ],
-
-                    if (companyId.isNotEmpty) ...[
-                      dividerBlock(),
-                      FutureBuilder<Map<String, dynamic>?>(
-                        future: _loadCompany(companyId),
-                        builder: (context, snap) {
-                          if (snap.connectionState == ConnectionState.waiting) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 8),
-                              child: Center(child: CircularProgressIndicator()),
-                            );
-                          }
-                          final cdata = snap.data;
-                          if (cdata == null) {
-                            return Text(
-                              'Şirket bilgisi bulunamadı.',
-                              style: TextStyle(
-                                color: AppColors.subtleText(theme),
-                                fontSize: 13,
-                              ),
-                            );
-                          }
-
-                          final about = (cdata['about'] ?? cdata['bio'] ?? '')
-                              .toString()
-                              .trim();
-                          final website = (cdata['website'] ?? '').toString().trim();
-                          final photo = (cdata['photoUrl'] ?? '').toString().trim();
-                          final finalLogo = logoUrl.isNotEmpty ? logoUrl : photo;
-
-                          return Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              sectionTitle('Şirket Hakkında'),
-                              const SizedBox(height: 10),
-                              Row(
-                                children: [
-                                  _CompanyLogoBox(
-                                    logoUrl: finalLogo,
-                                    fallbackText: companyName,
-                                    size: 48,
-                                  ),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Text(
-                                          companyName,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          style: const TextStyle(
-                                            fontSize: 14,
-                                            fontWeight: FontWeight.w900,
-                                          ),
-                                        ),
-                                        if (website.isNotEmpty)
-                                          Text(
-                                            website,
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: TextStyle(
-                                              fontSize: 12,
-                                              color: AppColors.subtleText(theme),
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              if (about.isNotEmpty) ...[
-                                const SizedBox(height: 10),
-                                sectionBody(about),
-                              ],
-                            ],
-                          );
-                        },
-                      ),
-                    ],
-
-                    // ✅ bottom bar boşluğu (overlay button için)
-                    const SizedBox(height: 86),
-                  ],
-                ),
-
-                // BOTTOM CTA
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 0,
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
-                    decoration: BoxDecoration(
-                      color: theme.colorScheme.surface,
-                      border: Border(
-                        top: BorderSide(
-                          color: theme.colorScheme.outlineVariant.withOpacity(0.35),
-                          width: 1,
-                        ),
-                      ),
-                    ),
-                    child: SizedBox(
-                      height: 52,
-                      width: double.infinity,
-                      child: isDark
-                          ? DecoratedBox(
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [
-                              Color(0xFF6D5DF6),
-                              Color(0xFF4FC3F7),
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                          borderRadius: BorderRadius.circular(14),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF6D5DF6).withOpacity(0.45),
-                              blurRadius: 14,
-                              offset: const Offset(0, 6),
-                            ),
-                          ],
-                        ),
-                        child: ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.transparent,
-                            shadowColor: Colors.transparent,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                          ),
-                          onPressed: () {
-                            Navigator.of(context).pop();
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => JobApplyScreen(
-                                  jobId: jobId,
-                                  job: job,
-                                ),
-                              ),
-                            );
-                          },
-                          child: const Text(
-                            'Başvur',
-                            style: TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 0.6,
-                              color: Colors.white,
-                              shadows: [
-                                Shadow(
-                                  offset: Offset(0, 1),
-                                  blurRadius: 3,
-                                  color: Colors.black38,
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                      )
-                          : ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                        ),
-                        onPressed: () {
-                          Navigator.of(context).pop();
-                          Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => JobApplyScreen(
-                                jobId: jobId,
-                                job: job,
-                              ),
-                            ),
-                          );
-                        },
-                        child: const Text(
-                          'Başvur',
-                          style: TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ),
+              if (snapshot.hasError) {
+                return Center(
+                  child: Text(
+                    'İlanlar yüklenirken hata oluştu:\n${snapshot.error}',
+                    textAlign: TextAlign.center,
                   ),
+                );
+              }
+
+              final docs = snapshot.data?.docs ?? [];
+              if (docs.isEmpty) {
+                return const Center(child: Text('Henüz yayınlanmış iş ilanı yok.'));
+              }
+
+              // ✅ Overflow fix: kartları biraz daha uzun yap.
+              const spacing = 10.0;
+              const aspect = 0.82;
+
+              return RefreshIndicator(
+                onRefresh: _refresh,
+                edgeOffset: 12,
+                child: GridView.builder(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: EdgeInsets.fromLTRB(
+                    12,
+                    12,
+                    12,
+                    12 + MediaQuery.of(context).padding.bottom + 120, // ✅ navbar + safe area payı
+                  ),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    crossAxisSpacing: spacing,
+                    mainAxisSpacing: spacing,
+                    childAspectRatio: aspect,
+                  ),
+                  itemCount: docs.length,
+                  itemBuilder: (context, index) {
+                    final doc = docs[index];
+                    final data = doc.data();
+
+                    final title = (data['title'] ?? '').toString().trim();
+                    final companyName =
+                    (data['companyName'] ?? '').toString().trim();
+                    final location = (data['location'] ?? '').toString().trim();
+                    final workModel =
+                    (data['workModel'] ?? '').toString().trim();
+
+                    final logoUrl =
+                    (data['companyLogoUrl'] ?? '').toString().trim();
+                    final companyId =
+                    (data['companyId'] ?? '').toString().trim();
+
+                    final displayTitle =
+                    title.isEmpty ? '(Pozisyon adı yok)' : title;
+                    final displayCompany = companyName.isEmpty
+                        ? 'Şirket adı belirtilmemiş'
+                        : companyName;
+                    final displayLocation = location.isEmpty
+                        ? 'Konum belirtilmemiş'
+                        : location;
+
+                    // Logo: önce job içindeki companyLogoUrl, boşsa users/{id}.photoUrl
+                    Widget logoWidget;
+                    if (companyId.isEmpty) {
+                      logoWidget = _CompanyLogoBox(
+                        logoUrl: logoUrl,
+                        fallbackText: displayCompany,
+                      );
+                    } else {
+                      logoWidget =
+                          FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+                            future: FirebaseFirestore.instance
+                                .collection('users')
+                                .doc(companyId)
+                                .get(),
+                            builder: (context, snap) {
+                              String finalLogo = logoUrl;
+                              if (snap.hasData && snap.data!.exists) {
+                                final u = snap.data!.data()!;
+                                final userLogo =
+                                (u['photoUrl'] ?? '').toString().trim();
+                                if (finalLogo.isEmpty && userLogo.isNotEmpty) {
+                                  finalLogo = userLogo;
+                                }
+                              }
+                              return _CompanyLogoBox(
+                                logoUrl: finalLogo,
+                                fallbackText: displayCompany,
+                              );
+                            },
+                          );
+                    }
+
+                    return _JobGridCard(
+                      theme: theme,
+                      title: displayTitle,
+                      company: displayCompany,
+                      location: displayLocation,
+                      workModel: workModel,
+                      logo: logoWidget,
+                      onTap: () => _openJobDetailsSheet(context, doc.id, data),
+                    );
+                  },
                 ),
-              ],
-            ),
+              );
+            },
           ),
-        );
-      },
+        ),
+      ],
     );
   }
 }
@@ -602,19 +247,32 @@ class _JobGridCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bgColor = AppColors.cardBg(theme);
-    final borderColor = AppColors.cardBorder(theme);
+    final isDark = theme.brightness == Brightness.dark;
+    final cs = theme.colorScheme;
+
+    final fill = isDark
+        ? Colors.white.withOpacity(0.06)
+        : Colors.white.withOpacity(0.72);
+    final border =
+    isDark ? Colors.white.withOpacity(0.14) : Colors.black.withOpacity(0.08);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         onTap: onTap,
         child: Ink(
           decoration: BoxDecoration(
-            color: bgColor,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: borderColor, width: 0.7),
+            color: fill,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: border, width: 0.9),
+            boxShadow: [
+              BoxShadow(
+                blurRadius: 22,
+                spreadRadius: 3,
+                color: Colors.black.withOpacity(isDark ? 0.22 : 0.10),
+              ),
+            ],
           ),
           padding: const EdgeInsets.all(12),
           child: Column(
@@ -628,7 +286,6 @@ class _JobGridCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 10),
-
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -639,7 +296,7 @@ class _JobGridCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         fontSize: 15,
-                        fontWeight: FontWeight.w800,
+                        fontWeight: FontWeight.w900,
                         height: 1.15,
                       ),
                     ),
@@ -650,15 +307,18 @@ class _JobGridCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
                         fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                        fontWeight: FontWeight.w700,
                         color: AppColors.subtleText(theme),
                       ),
                     ),
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        Icon(Icons.location_on_outlined,
-                            size: 14, color: AppColors.subtleText(theme)),
+                        Icon(
+                          Icons.location_on_outlined,
+                          size: 14,
+                          color: AppColors.subtleText(theme),
+                        ),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -676,21 +336,33 @@ class _JobGridCard extends StatelessWidget {
                   ],
                 ),
               ),
-
               const SizedBox(height: 8),
-
               SizedBox(
-                height: 28,
+                height: 24,
                 child: ListView(
                   scrollDirection: Axis.horizontal,
                   physics: const BouncingScrollPhysics(),
                   children: const [
-                    _MiniTag(icon: Icons.flash_on, label: 'Kolay Başvuru'),
+                    _MiniTag(icon: Icons.flash_on, label: 'Kolay'),
                     SizedBox(width: 6),
                     _MiniTag(icon: Icons.fiber_new, label: 'Yeni'),
                     SizedBox(width: 6),
-                    _MiniTag(icon: Icons.visibility, label: 'Görüntülendi'),
+                    _MiniTag(icon: Icons.visibility, label: 'Görüntü'),
                   ],
+                ),
+              ),
+              const SizedBox(height: 2),
+              Container(
+                height: 2,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: LinearGradient(
+                    colors: [
+                      cs.primary.withOpacity(0.55),
+                      cs.tertiary.withOpacity(0.30),
+                      Colors.transparent,
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -710,9 +382,8 @@ class _ActiveBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant.withOpacity(
-          theme.brightness == Brightness.dark ? 0.18 : 0.65,
-        ),
+        color: theme.colorScheme.surfaceVariant
+            .withOpacity(theme.brightness == Brightness.dark ? 0.18 : 0.65),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
@@ -724,7 +395,7 @@ class _ActiveBadge extends StatelessWidget {
             'Aktif',
             style: TextStyle(
               fontSize: 11,
-              fontWeight: FontWeight.w700,
+              fontWeight: FontWeight.w800,
               color: theme.colorScheme.onSurface,
             ),
           ),
@@ -745,23 +416,22 @@ class _MiniTag extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant.withOpacity(
-          theme.brightness == Brightness.dark ? 0.18 : 0.65,
-        ),
+        color: theme.colorScheme.surfaceVariant
+            .withOpacity(theme.brightness == Brightness.dark ? 0.18 : 0.65),
         borderRadius: BorderRadius.circular(999),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 13, color: theme.colorScheme.onSurfaceVariant),
+          Icon(icon, size: 12, color: theme.colorScheme.onSurfaceVariant),
           const SizedBox(width: 5),
           Text(
             label,
             style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
+              fontSize: 10.5,
+              fontWeight: FontWeight.w700,
               color: theme.colorScheme.onSurface,
             ),
           ),
@@ -790,10 +460,14 @@ class _CompanyLogoBox extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceVariant.withOpacity(
-          theme.brightness == Brightness.dark ? 0.18 : 0.65,
-        ),
+        color: theme.colorScheme.surfaceVariant
+            .withOpacity(theme.brightness == Brightness.dark ? 0.18 : 0.65),
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: theme.brightness == Brightness.dark
+              ? Colors.white.withOpacity(0.14)
+              : Colors.black.withOpacity(0.06),
+        ),
       ),
       clipBehavior: Clip.antiAlias,
       child: logoUrl.isNotEmpty
@@ -826,4 +500,27 @@ Widget _buildLogoFallback(BuildContext context, String companyName) {
       ),
     ),
   );
+}
+
+class _GlowBlob extends StatelessWidget {
+  final double size;
+  final Color color;
+
+  const _GlowBlob({required this.size, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          gradient: RadialGradient(
+            colors: [color, color.withOpacity(0.0)],
+          ),
+        ),
+      ),
+    );
+  }
 }

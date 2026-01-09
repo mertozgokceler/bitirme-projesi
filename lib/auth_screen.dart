@@ -2,7 +2,8 @@
 
 import 'dart:math' as math;
 import 'dart:ui';
-import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform;
+
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -521,7 +522,7 @@ class _AuthScreenState extends State<AuthScreen> {
                   tooltip: 'GitHub',
                   onTap: _loading ? () {} : () => _social(AuthProviderType.github),
                 ),
-                if (Platform.isIOS)
+                if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS)
                   _SocialRoundIcon(
                     asset: kIconApple,
                     tooltip: 'Apple',
@@ -529,7 +530,6 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
               ],
             ),
-
 
             const SizedBox(height: 10),
 
