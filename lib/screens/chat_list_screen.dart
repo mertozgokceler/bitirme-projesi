@@ -386,6 +386,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final t = Theme.of(context);
     final cs = t.colorScheme;
     final isDark = t.brightness == Brightness.dark;
+    final unreadMap = (chatData['unread'] as Map?) ?? {};
+    final int unreadFromMap =
+        (unreadMap[currentUserUid] as num?)?.toInt() ?? 0;
+
+    final dottedKey = 'unread.$currentUserUid';
+    final int unreadFromDotted =
+        (chatData[dottedKey] as num?)?.toInt() ?? 0;
+
+    final int unreadCount = unreadFromMap != 0 ? unreadFromMap : unreadFromDotted;
+
+
 
     final otherUserName =
     (otherUserData['name'] ?? 'Bilinmeyen Kullanıcı').toString();
@@ -463,31 +474,59 @@ class _ChatListScreenState extends State<ChatListScreen> {
             );
           },
           onLongPress: () => _showChatOptions(chatId: chatId, chatData: chatData),
-          trailing: PopupMenuButton<String>(
-            iconColor: cs.onSurface.withOpacity(0.60),
-            color: cs.surface.withOpacity(isDark ? 0.92 : 0.98),
-            surfaceTintColor: Colors.transparent,
-            onSelected: (value) async {
-              if (value == 'archive') {
-                await _toggleArchive(chatId, !isArchivedForUser);
-              } else if (value == 'delete') {
-                await _deleteChatForEveryone(chatId);
-              }
-            },
-            itemBuilder: (context) => [
-              PopupMenuItem(
-                value: 'archive',
-                child: Text(
-                  isArchivedForUser ? 'Arşivden Çıkar' : 'Arşive Taşı',
-                  style: TextStyle(color: cs.onSurface, fontWeight: FontWeight.w800),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (unreadCount > 0)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF6E44FF),
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    unreadCount > 99 ? '99+' : '$unreadCount',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
                 ),
-              ),
-              const PopupMenuItem(
-                value: 'delete',
-                child: Text(
-                  'Sohbeti Sil',
-                  style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900),
-                ),
+              const SizedBox(width: 8),
+              PopupMenuButton<String>(
+                iconColor: cs.onSurface.withOpacity(0.60),
+                color: cs.surface.withOpacity(isDark ? 0.92 : 0.98),
+                surfaceTintColor: Colors.transparent,
+                onSelected: (value) async {
+                  if (value == 'archive') {
+                    await _toggleArchive(chatId, !isArchivedForUser);
+                  } else if (value == 'delete') {
+                    await _deleteChatForEveryone(chatId);
+                  }
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'archive',
+                    child: Text(
+                      isArchivedForUser ? 'Arşivden Çıkar' : 'Arşive Taşı',
+                      style: TextStyle(
+                        color: cs.onSurface,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const PopupMenuItem(
+                    value: 'delete',
+                    child: Text(
+                      'Sohbeti Sil',
+                      style: TextStyle(
+                        color: Colors.redAccent,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),

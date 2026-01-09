@@ -18,7 +18,7 @@ class InAppNotificationModel {
   final DateTime createdAt;
   bool isRead;
 
-  /// ✅ Payload: ilgili sayfaya yönlendirmek için hedef id'ler burada taşınır
+  /// Payload: ilgili sayfaya yönlendirmek için hedef id'ler burada taşınır
   /// Örn:
   ///  - message: {chatId, peerId}
   ///  - like/comment: {postId}
@@ -36,7 +36,6 @@ class InAppNotificationModel {
     Map<String, dynamic>? data,
   }) : data = data ?? const {};
 
-  // ✅ SAFE PARSERS (eski kayıtlar null/eksik olabilir)
   static String _s(dynamic v, {String fallback = ''}) {
     if (v == null) return fallback;
     final x = v.toString().trim();
@@ -53,14 +52,12 @@ class InAppNotificationModel {
   }
 
   static DateTime _dt(dynamic v) {
-    // createdAt: int millis bekliyoruz ama eski kayıtlar string/num/null olabilir
     if (v == null) return DateTime.now();
     if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
     if (v is num) return DateTime.fromMillisecondsSinceEpoch(v.toInt());
     final s = v.toString().trim();
     final parsed = int.tryParse(s);
     if (parsed != null) return DateTime.fromMillisecondsSinceEpoch(parsed);
-    // ISO date gelirse:
     final iso = DateTime.tryParse(s);
     return iso ?? DateTime.now();
   }
@@ -68,7 +65,6 @@ class InAppNotificationModel {
   static Map<String, dynamic> _map(dynamic v) {
     if (v == null) return <String, dynamic>{};
     if (v is Map) return Map<String, dynamic>.from(v);
-    // string json gelirse
     if (v is String) {
       try {
         final decoded = jsonDecode(v);
@@ -85,7 +81,7 @@ class InAppNotificationModel {
     final message = _s(json['message'], fallback: '');
     final createdAt = _dt(json['createdAt']);
     final isRead = _b(json['isRead'], fallback: false);
-    final data = _map(json['data']); // ✅ yeni
+    final data = _map(json['data']);
 
     return InAppNotificationModel(
       id: id,
@@ -106,12 +102,11 @@ class InAppNotificationModel {
       'message': message,
       'createdAt': createdAt.millisecondsSinceEpoch,
       'isRead': isRead,
-      'data': data, // ✅ yeni
+      'data': data,
     };
   }
 }
 
-/// Uygulama içi bildirim servisi
 class InAppNotificationService extends ChangeNotifier {
   String? _currentUserId;
 
@@ -124,7 +119,7 @@ class InAppNotificationService extends ChangeNotifier {
 
   bool _loaded = false;
 
-  /// ✅ Bildirime tıklama olayı (local notification tap gibi) UI tarafından dinlenebilir
+  /// Bildirime tıklama olayı
   final ValueNotifier<InAppNotificationModel?> tappedNotification = ValueNotifier(null);
 
   Future<void> initForUser(String? uid) async {
@@ -156,7 +151,6 @@ class InAppNotificationService extends ChangeNotifier {
       notifyListeners();
     } catch (e) {
       debugPrint('DEBUG[inapp] loadFromPrefs error: $e');
-      // bozuk json varsa çöpü temizle
       try {
         final prefs = await SharedPreferences.getInstance();
         await prefs.remove(_prefsKey);
@@ -189,15 +183,14 @@ class InAppNotificationService extends ChangeNotifier {
     return 'n_${ts}_${rand.nextInt(1 << 32)}';
   }
 
-  /// ✅ Uygulama içi bildirimi ekle (overlay optional)
   void show(
       String title,
       String message, {
         BuildContext? context,
         bool showOverlay = true,
         String type = 'system',
-        Map<String, dynamic>? data, // ✅ yeni
-        VoidCallback? onOverlayTap,  // ✅ istersen banner tıklamasına aksiyon
+        Map<String, dynamic>? data,
+        VoidCallback? onOverlayTap,
       }) {
     final model = InAppNotificationModel(
       id: _generateId(),
@@ -210,7 +203,6 @@ class InAppNotificationService extends ChangeNotifier {
     );
 
     _items.insert(0, model);
-
     notifyListeners();
     _saveToPrefs();
 
@@ -349,12 +341,8 @@ class InAppNotificationService extends ChangeNotifier {
   }
 }
 
-/// Global instance
 final inAppNotificationService = InAppNotificationService();
 
-/// ===========================================================
-/// ✅ Tek yerden UI renk kararları (In-app notif banner)
-/// ===========================================================
 class InAppNotifUI {
   final Color bannerBg;
   final Color bannerBorder;

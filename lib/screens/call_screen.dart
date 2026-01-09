@@ -32,6 +32,9 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
 
     c.statusText.addListener(_onStatusChanged);
 
+    // ✅ remote ended gelince UI kesin kapansın (callback'e bağlı kalma)
+    c.statusText.addListener(_autoCloseIfEnded);
+
     // Video call’da speaker açmak istersen
     if (c.isVideo && !c.speakerOn) {
       // ignore: discarded_futures
@@ -52,10 +55,40 @@ class _CallScreenState extends State<CallScreen> with WidgetsBindingObserver {
     }
   }
 
+  // ✅ Remote ended/rejected -> cleanup + pop (UI donmasın)
+  void _autoCloseIfEnded() {
+    if (_closed) return;
+
+    final v = c.statusText.value.toLowerCase();
+
+    final ended = v.contains('sonlandı') ||
+        v.contains('ended') ||
+        v.contains('rejected') ||
+        v.contains('declined') ||
+        v.contains('kapat');
+
+    if (!ended) return;
+
+    Future.microtask(() async {
+      if (_closed) return;
+
+      try {
+        // Remote ended’de writeEnded YAZMA (zaten remote yazdı)
+        await c.disposeAll(writeEnded: false)
+            .timeout(const Duration(milliseconds: 900));
+      } catch (_) {
+        // ignore
+      } finally {
+        await _safePop();
+      }
+    });
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     c.statusText.removeListener(_onStatusChanged);
+    c.statusText.removeListener(_autoCloseIfEnded);
 
     _ticker?.cancel();
     _ticker = null;

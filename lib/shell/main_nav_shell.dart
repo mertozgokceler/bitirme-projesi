@@ -586,18 +586,28 @@ class _MainNavShellState extends State<MainNavShell>
         if (data == null) continue;
 
         final chatId = change.doc.id;
+
+// ✅ arşiv kontrolü (BU SENİN İSTEDİĞİN)
+        final List<dynamic> archivedBy = (data['archivedBy'] ?? const []);
+        final bool isArchivedForMe = archivedBy.contains(currentUser.uid);
+
         final senderId = data['lastMessageSenderId'] as String?;
         final ts = data['lastMessageTimestamp'] as Timestamp?;
-        final lastMessage =
-        (data['lastMessage'] ?? 'Sana yeni bir mesaj geldi').toString();
+        final lastMessage = (data['lastMessage'] ?? 'Sana yeni bir mesaj geldi').toString();
 
         if (senderId == null) continue;
         if (senderId == currentUser.uid) continue;
 
+// timestamp gate
         if (ts != null) {
           final oldTs = _lastSeenChatTs[chatId];
           if (oldTs != null && !ts.toDate().isAfter(oldTs.toDate())) continue;
           _lastSeenChatTs[chatId] = ts;
+        }
+
+// ✅ ARŞİVDEYSE: bildirim yok (ama sayaç artışı chat doc tarafında)
+        if (isArchivedForMe) {
+          continue;
         }
 
         if (!mounted) return;
